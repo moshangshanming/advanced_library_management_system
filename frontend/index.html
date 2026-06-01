@@ -38,6 +38,7 @@
       <button data-view="books" class="nav">图书管理</button>
       <button data-view="readers" class="nav admin-only">读者管理</button>
       <button data-view="records" class="nav">借还记录</button>
+      <button data-view="reports" class="nav">读书报告</button>
       <button data-view="overdue" class="nav">逾期提醒</button>
     </aside>
 
@@ -154,6 +155,21 @@
         </article>
       </section>
 
+      <section id="reports" class="view">
+        <article class="panel">
+          <div class="panel-title"><h3>读者个性化读书报告</h3><span>支持在线预览与下载报告</span></div>
+          <div class="form-grid grid-3">
+            <label class="admin-only">读者<select id="reportReader"><option value="">请选择读者</option></select></label>
+            <button id="generateReportBtn" class="primary" type="button">生成报告</button>
+            <button id="downloadReportBtn" class="ghost" type="button">下载 CSV</button>
+          </div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><h3>报告预览</h3><span>展示当前读者的借阅与阅读汇总</span></div>
+          <div id="reportPreview" class="report-preview"></div>
+        </article>
+      </section>
+
       <section id="overdue" class="view">
         <article class="panel">
           <div class="panel-title"><h3>逾期提醒中心</h3><span>自动扫描逾期记录并生成提醒消息</span></div>
@@ -168,6 +184,6 @@
     </section>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=2"></script>
 </body>
 </html>

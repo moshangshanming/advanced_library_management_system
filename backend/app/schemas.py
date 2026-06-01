@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -56,3 +56,36 @@ class BorrowCreate(BaseModel):
     reader_id: Optional[int] = Field(default=None, ge=1)
     days: int = Field(default=30, ge=1, le=180)
     remark: str = Field(default="", max_length=200)
+
+
+class ReaderReportItem(BaseModel):
+    id: int
+    book_title: str
+    isbn: str
+    borrow_date: str
+    due_date: str
+    return_date: Optional[str]
+    status: str
+    remark: str
+    overdue_days: int
+    borrow_duration_days: int
+
+
+class ReaderReportSummary(BaseModel):
+    total_borrowed: int
+    currently_borrowed: int
+    overdue: int
+    returned: int
+    total_reading_days: int
+    average_borrow_duration_days: float
+    average_return_duration_days: float
+
+
+class ReaderReport(BaseModel):
+    reader_id: int
+    reader_name: str
+    reader_username: str
+    department: str
+    generated_at: str
+    summary: ReaderReportSummary
+    records: List[ReaderReportItem]

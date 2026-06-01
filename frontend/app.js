@@ -1,3 +1,4 @@
+console.log('app.js loaded');
 const state = {
   token: localStorage.getItem('library_token') || '',
   user: null,
@@ -5,6 +6,7 @@ const state = {
   recordPage: 1,
   lastBooks: [],
   lastReaders: [],
+  currentReport: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -84,6 +86,7 @@ function switchView(viewName) {
     books: ['图书管理', '完成图书新增、删除、查询和修改。'],
     readers: ['读者管理', '维护读者基础信息与账号状态。'],
     records: ['借还记录', '记录每一次借书与还书操作。'],
+    reports: ['读书报告', '为读者生成个性化报告并在线预览。'],
     overdue: ['逾期提醒', '发现逾期借阅并生成提醒消息。'],
   };
   $('pageTitle').textContent = titleMap[viewName][0];
@@ -92,6 +95,7 @@ function switchView(viewName) {
   if (viewName === 'books') loadBooks();
   if (viewName === 'readers') loadReaders();
   if (viewName === 'records') { loadBorrowOptions(); loadRecords(); }
+  if (viewName === 'reports') loadReportView();
   if (viewName === 'overdue') loadOverdue();
 }
 
@@ -277,6 +281,107 @@ async function loadOverdue() {
   </tbody>`;
 }
 
+async function loadReportView() {
+  state.currentReport = null;
+  $('reportPreview').innerHTML = '<p>请点击“生成报告”查看当前读者的阅读汇总。</p>';
+  if (state.user.role === 'admin') {
+    await loadReportReaders();
+  }
+}
+
+async function loadReportReaders() {
+  const data = await api('/api/readers?page=1&page_size=100');
+  $('reportReader').innerHTML = '<option value="">请选择读者</option>' + data.items.map(r => `<option value="${r.id}">${escapeHtml(r.full_name)} / ${escapeHtml(r.username)}</option>`).join('');
+}
+
+async function loadReport() {
+  console.log('loadReport called');
+  try {
+    let url = '/api/reports/reader';
+    if (state.user.role === 'admin') {
+      const readerId = $('reportReader').value;
+      if (!readerId) return toast('请选择要生成报告的读者', 'error');
+      url += `?reader_id=${readerId}`;
+    }
+    const report = await api(url);
+    state.currentReport = report;
+    renderReport(report);
+  } catch (err) {
+    console.error('loadReport error', err);
+    toast(err.message, 'error');
+  }
+}
+
+function renderReport(report) {
+  const summary = report.summary;
+  const rows = report.records;
+  const summaryHtml = `
+    <div class="report-summary">
+      <div><strong>读者：</strong>${escapeHtml(report.reader_name)} / ${escapeHtml(report.reader_username)}</div>
+      <div><strong>院系：</strong>${escapeHtml(report.department)}</div>
+      <div><strong>生成时间：</strong>${escapeHtml(report.generated_at)}</div>
+      <div><strong>总借阅次数：</strong>${summary.total_borrowed}</div>
+      <div><strong>当前借阅：</strong>${summary.currently_borrowed}</div>
+      <div><strong>已逾期：</strong>${summary.overdue}</div>
+      <div><strong>已归还：</strong>${summary.returned}</div>
+      <div><strong>累计阅读天数：</strong>${summary.total_reading_days} 天</div>
+      <div><strong>平均借阅时长：</strong>${summary.average_borrow_duration_days} 天</div>
+      <div><strong>平均归还时长：</strong>${summary.average_return_duration_days} 天</div>
+    </div>
+  `;
+  const tableHtml = rows.length ? `
+    <div class="table-wrap"><table><thead><tr><th>ID</th><th>书名</th><th>ISBN</th><th>借出</th><th>应还</th><th>归还</th><th>状态</th><th>借阅天数</th><th>逾期</th></tr></thead><tbody>
+      ${rows.map(item => `<tr><td>${item.id}</td><td>${escapeHtml(item.book_title)}</td><td>${escapeHtml(item.isbn)}</td><td>${item.borrow_date}</td><td>${item.due_date}</td><td>${item.return_date || '-'}</td><td>${statusBadge(item.status)}</td><td>${item.borrow_duration_days}</td><td>${Math.max(item.overdue_days, 0)}</td></tr>`).join('')}
+    </tbody></table></div>
+  ` : '<p>当前读者暂无借阅记录。</p>';
+  $('reportPreview').innerHTML = summaryHtml + tableHtml;
+}
+
+function downloadReport() {
+  console.log('downloadReport called');
+  if (!state.currentReport) return toast('请先生成报告再下载', 'error');
+  const report = state.currentReport;
+  const csvEscape = (value) => {
+    const text = String(value ?? '');
+    if (/[",\r\n]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  };
+
+  const summaryRows = [
+    ['读者', `${report.reader_name} / ${report.reader_username}`],
+    ['院系', report.department],
+    ['生成时间', report.generated_at],
+    ['总借阅次数', report.summary.total_borrowed],
+    ['当前借阅', report.summary.currently_borrowed],
+    ['已逾期', report.summary.overdue],
+    ['已归还', report.summary.returned],
+    ['累计阅读天数', `${report.summary.total_reading_days} 天`],
+    ['平均借阅时长', `${report.summary.average_borrow_duration_days} 天`],
+    ['平均归还时长', `${report.summary.average_return_duration_days} 天`],
+  ];
+
+  const recordHeader = ['记录ID', '书名', 'ISBN', '借出日期', '应还日期', '归还日期', '状态', '借阅天数', '逾期天数'];
+  const recordLines = report.records.map(item => [
+    item.id,
+    item.book_title,
+    item.isbn,
+    item.borrow_date,
+    item.due_date,
+    item.return_date || '-',
+    item.status,
+    item.borrow_duration_days,
+    Math.max(item.overdue_days, 0),
+  ].map(csvEscape).join(','));
+
+  const csvContent = summaryRows.map(row => row.map(csvEscape).join(',')).join('\r\n')
+    + '\r\n\r\n' + recordHeader.map(csvEscape).join(',')
+    + '\r\n' + recordLines.join('\r\n');
+
+  downloadCsv(`读书报告-${report.reader_username || report.reader_name}.csv`, csvContent);
+}
+
 function downloadCsv(filename, text) {
   const blob = new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -343,5 +448,8 @@ $('generateRemindersBtn').addEventListener('click', async () => {
 });
 $('exportBooksBtn').addEventListener('click', async () => downloadCsv('books.csv', await api('/api/export/books')));
 $('exportRecordsBtn').addEventListener('click', async () => downloadCsv('borrow_records.csv', await api('/api/export/borrow-records')));
+$('generateReportBtn').addEventListener('click', loadReport);
+$('downloadReportBtn').addEventListener('click', downloadReport);
+console.log('report buttons bound', $('generateReportBtn'), $('downloadReportBtn'));
 
 initAuth();

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +10,7 @@ from .config import APP_NAME, APP_VERSION, FRONTEND_DIR
 from .database import db_manager
 from .schemas import BookCreate, BookUpdate, BorrowCreate, LoginRequest, ReaderCreate, ReaderUpdate
 from .security import create_token, verify_password, verify_token
-from .services import book_service, borrow_service, export_service, reader_service, stats_service
+from .services import book_service, borrow_service, export_service, reader_service, report_service, stats_service
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
 
@@ -186,6 +186,11 @@ def export_books(_: Dict[str, Any] = Depends(get_current_user)):
 @app.get("/api/export/borrow-records", response_class=PlainTextResponse)
 def export_records(current_user: Dict[str, Any] = Depends(get_current_user)):
     return PlainTextResponse(export_service.export_records(current_user), media_type="text/csv; charset=utf-8")
+
+
+@app.get("/api/reports/reader")
+def reader_report(reader_id: Optional[int] = None, current_user: Dict[str, Any] = Depends(get_current_user)):
+    return report_service.generate_reader_report(current_user, reader_id)
 
 
 if __name__ == "__main__":

@@ -407,8 +407,64 @@ class ExportService:
         return self.to_csv(rows)
 
 
+class ReportService:
+    def _resolve_reader(self, current_user: Dict[str, Any], reader_id: Optional[int] = None) -> Dict[str, Any]:
+        if current_user["role"] == "reader":
+            if reader_id is not None and reader_id != current_user["id"]:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看他人读者报告。")
+            return reader_service.get_reader(current_user["id"])
+        if reader_id is None:
+            raise HTTPException(status_code=400, detail="管理员请指定 reader_id。")
+        return reader_service.get_reader(reader_id)
+
+    def generate_reader_report(self, current_user: Dict[str, Any], reader_id: Optional[int] = None) -> Dict[str, Any]:
+        reader = self._resolve_reader(current_user, reader_id)
+        rows = db_manager.fetch_all(
+            "SELECT * FROM v_borrow_detail WHERE reader_id = ? ORDER BY borrow_date DESC",
+            (reader["id"],),
+        )
+        report_items: List[Dict[str, Any]] = []
+        total_reading_days = 0
+        total_returned_days = 0
+        for row in rows:
+            borrow_date = date.fromisoformat(row["borrow_date"])
+            end_date = date.fromisoformat(row["return_date"]) if row["return_date"] else date.today()
+            duration_days = max((end_date - borrow_date).days, 0)
+            row["borrow_duration_days"] = duration_days
+            report_items.append(row)
+            total_reading_days += duration_days
+            if row["status"] == "returned":
+                total_returned_days += duration_days
+
+        total_borrowed = len(report_items)
+        currently_borrowed = sum(1 for item in report_items if item["status"] == "borrowed")
+        overdue = sum(1 for item in report_items if item["status"] == "overdue")
+        returned = sum(1 for item in report_items if item["status"] == "returned")
+        average_borrow_duration = round(total_reading_days / total_borrowed, 1) if total_borrowed else 0.0
+        average_return_duration = round(total_returned_days / returned, 1) if returned else 0.0
+
+        return {
+            "reader_id": reader["id"],
+            "reader_name": reader["full_name"],
+            "reader_username": reader["username"],
+            "department": reader["department"],
+            "generated_at": date.today().isoformat(),
+            "summary": {
+                "total_borrowed": total_borrowed,
+                "currently_borrowed": currently_borrowed,
+                "overdue": overdue,
+                "returned": returned,
+                "total_reading_days": total_reading_days,
+                "average_borrow_duration_days": average_borrow_duration,
+                "average_return_duration_days": average_return_duration,
+            },
+            "records": report_items,
+        }
+
+
 book_service = BookService()
 reader_service = ReaderService()
 borrow_service = BorrowService()
 stats_service = StatsService()
 export_service = ExportService()
+report_service = ReportService()
