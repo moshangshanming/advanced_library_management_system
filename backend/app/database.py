@@ -50,13 +50,23 @@ class DatabaseManager:
 
     def init_db(self) -> None:
         with self.transaction() as conn:
+            # 添加新字段（如果不存在）
+            try:
+                conn.execute("ALTER TABLE borrow_records ADD COLUMN fine_amount REAL NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # 字段已存在
+            try:
+                conn.execute("ALTER TABLE borrow_records ADD COLUMN fine_paid INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # 字段已存在
+            
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
-                    role TEXT NOT NULL CHECK(role IN ('admin', 'reader')),
+                    role TEXT NOT NULL CHECK(role IN ('admin', 'reader', 'librarian')),
                     full_name TEXT NOT NULL,
                     phone TEXT DEFAULT '',
                     email TEXT DEFAULT '',
@@ -76,6 +86,7 @@ class DatabaseManager:
                     available_count INTEGER NOT NULL CHECK(available_count >= 0),
                     shelf_location TEXT DEFAULT '',
                     description TEXT DEFAULT '',
+                    cover_image TEXT DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
                 );
@@ -88,7 +99,20 @@ class DatabaseManager:
                     due_date TEXT NOT NULL,
                     return_date TEXT,
                     status TEXT NOT NULL CHECK(status IN ('borrowed', 'returned', 'overdue')),
+                    fine_amount REAL NOT NULL DEFAULT 0,
+                    fine_paid INTEGER NOT NULL DEFAULT 0,
                     remark TEXT DEFAULT '',
+                    FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE RESTRICT,
+                    FOREIGN KEY(reader_id) REFERENCES users(id) ON DELETE RESTRICT
+                );
+
+                CREATE TABLE IF NOT EXISTS book_reservations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    book_id INTEGER NOT NULL,
+                    reader_id INTEGER NOT NULL,
+                    reserve_date TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'borrowed', 'cancelled', 'expired')),
+                    notified INTEGER NOT NULL DEFAULT 0,
                     FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE RESTRICT,
                     FOREIGN KEY(reader_id) REFERENCES users(id) ON DELETE RESTRICT
                 );
@@ -178,7 +202,13 @@ class DatabaseManager:
                     r.return_date,
                     r.status,
                     r.remark,
-                    CAST(julianday('now') - julianday(r.due_date) AS INTEGER) AS overdue_days
+                    r.fine_amount,
+                    r.fine_paid,
+                    CAST(julianday(CASE WHEN r.return_date IS NOT NULL THEN r.return_date ELSE 'now' END) - julianday(r.due_date) AS INTEGER) AS overdue_days,
+                    ROUND(
+                        CAST(julianday(CASE WHEN r.return_date IS NOT NULL THEN r.return_date ELSE 'now' END) - julianday(r.due_date) AS REAL) * 0.5,
+                        2
+                    ) AS calculated_fine
                 FROM borrow_records r
                 JOIN books b ON r.book_id = b.id
                 JOIN users u ON r.reader_id = u.id;
@@ -196,6 +226,7 @@ class DatabaseManager:
                 """,
                 [
                     ("admin", hash_password("admin123"), "admin", "系统管理员", "13800000000", "admin@library.local", "图书馆"),
+                    ("librarian", hash_password("librarian123"), "librarian", "图书馆员", "13811112222", "librarian@library.local", "图书馆"),
                     ("reader", hash_password("reader123"), "reader", "测试读者", "13900000000", "reader@library.local", "软件工程专业"),
                     ("zhangsan", hash_password("123456"), "reader", "张三", "13611112222", "zhangsan@example.com", "人工智能学院"),
                     ("lisi", hash_password("123456"), "reader", "李四", "13733334444", "lisi@example.com", "经管学院"),

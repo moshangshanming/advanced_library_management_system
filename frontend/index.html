@@ -83,7 +83,7 @@
       <button data-view="readers" class="nav admin-only">读者管理</button>
       <button data-view="records" class="nav">借还记录</button>
       <button data-view="reports" class="nav">读书报告</button>
-      <button data-view="overdue" class="nav">逾期提醒</button>
+      <button data-view="overdue" class="nav">逾期管理</button>
       <button data-view="announcements" class="nav">公告通知</button>
       <button data-view="audit" class="nav admin-only">操作日志</button>
     </aside>
@@ -121,13 +121,21 @@
 
       <section id="books" class="view">
         <article class="panel">
-          <div class="panel-title"><h3>图书检索</h3><span>支持标题 / 作者 / ISBN / 出版社模糊查询</span></div>
+          <div class="panel-title"><h3>图书检索</h3><span>支持多条件精确搜索</span></div>
           <div class="toolbar">
-            <input id="bookSearch" placeholder="输入关键词搜索图书" />
+            <input id="bookSearch" placeholder="关键词（标题/作者/ISBN/出版社）" />
+            <input id="bookIsbnSearch" placeholder="ISBN" />
+            <input id="bookAuthorSearch" placeholder="作者" />
+            <input id="bookPublisherSearch" placeholder="出版社" />
             <select id="categoryFilter"><option value="">全部分类</option></select>
             <button id="bookSearchBtn" class="primary">查询</button>
             <button id="exportBooksBtn" class="ghost">导出 CSV</button>
+            <label class="import-label">
+              <input type="file" id="importBooksFile" accept=".csv" hidden />
+              <button id="importBooksBtn" class="primary">批量导入</button>
+            </label>
           </div>
+          <div id="bookImportResult" class="import-result hidden"></div>
         </article>
 
         <article class="panel admin-only">
@@ -142,7 +150,15 @@
             <label>馆藏总数<input id="bookTotal" type="number" min="0" required /></label>
             <label>可借数量<input id="bookAvailable" type="number" min="0" /></label>
             <label>书架位置<input id="bookShelf" /></label>
-            <label class="span-4">简介<input id="bookDescription" /></label>
+            <label class="span-4">简介<textarea id="bookDescription" rows="3"></textarea></label>
+            <label class="span-4">封面图片
+              <div class="upload-area" id="bookCoverUpload">
+                <input type="file" id="bookCoverFile" accept="image/*" hidden />
+                <div id="bookCoverPreview" class="cover-preview"></div>
+                <button type="button" id="uploadCoverBtn" class="ghost small">点击上传封面</button>
+                <span id="coverFileName" class="file-name"></span>
+              </div>
+            </label>
             <button class="primary" type="submit">保存图书</button>
             <button id="resetBookForm" class="ghost" type="button">清空</button>
           </form>
@@ -150,7 +166,7 @@
 
         <article class="panel">
           <div class="panel-title"><h3>图书列表</h3><span id="bookTotalText"></span></div>
-          <div class="table-wrap"><table id="bookTable"></table></div>
+          <div class="book-grid" id="bookGrid"></div>
           <div class="pager"><button id="bookPrev">上一页</button><span id="bookPageText"></span><button id="bookNext">下一页</button></div>
         </article>
       </section>
@@ -196,7 +212,7 @@
           </form>
         </article>
         <article class="panel">
-          <div class="panel-title"><h3>借还记录</h3><span>分页查询 + 状态筛选</span></div>
+          <div class="panel-title"><h3>借还记录</h3><span>分页查询 + 状态筛选 + 续借功能</span></div>
           <div class="toolbar">
             <input id="recordKeyword" placeholder="书名 / 读者 / ISBN" />
             <select id="recordStatus"><option value="">全部状态</option><option value="borrowed">借阅中</option><option value="overdue">已逾期</option><option value="returned">已归还</option></select>
@@ -205,6 +221,24 @@
           </div>
           <div class="table-wrap"><table id="recordTable"></table></div>
           <div class="pager"><button id="recordPrev">上一页</button><span id="recordPageText"></span><button id="recordNext">下一页</button></div>
+        </article>
+        <article class="panel reader-only">
+          <div class="panel-title"><h3>图书预约</h3><span>库存不足时可预约，到书后通知您</span></div>
+          <div class="toolbar">
+            <input id="reserveBookSearch" placeholder="搜索图书" />
+            <button id="searchReserveBookBtn" class="primary">搜索可预约图书</button>
+          </div>
+          <div id="reserveBookList" class="book-grid"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><h3>预约记录</h3><span>管理图书预约申请</span></div>
+          <div class="toolbar">
+            <input id="reservationKeyword" placeholder="书名 / 预约人 / ISBN" />
+            <select id="reservationStatus"><option value="">全部状态</option><option value="pending">待处理</option><option value="borrowed">已借阅</option><option value="cancelled">已取消</option><option value="expired">已过期</option></select>
+            <button id="reservationSearchBtn" class="primary">查询</button>
+          </div>
+          <div class="table-wrap"><table id="reservationTable"></table></div>
+          <div class="pager"><button id="reservationPrev">上一页</button><span id="reservationPageText"></span><button id="reservationNext">下一页</button></div>
         </article>
       </section>
 
@@ -246,13 +280,46 @@
 
       <section id="overdue" class="view">
         <article class="panel">
-          <div class="panel-title"><h3>逾期提醒中心</h3><span>自动扫描逾期记录并生成提醒消息</span></div>
+          <div class="panel-title"><h3>逾期管理</h3><span>自动计算逾期天数和罚金，罚金标准：每天 0.5 元</span></div>
+          <div class="statistics-grid">
+            <div class="stat-card">
+              <div class="stat-value" id="statCurrentOverdue">0</div>
+              <div class="stat-label">当前逾期</div>
+            </div>
+            <div class="stat-card warning">
+              <div class="stat-value" id="statUnpaidCount">0</div>
+              <div class="stat-label">未缴罚金数</div>
+            </div>
+            <div class="stat-card danger">
+              <div class="stat-value" id="statUnpaidFine">0.00</div>
+              <div class="stat-label">未缴罚金总额</div>
+            </div>
+            <div class="stat-card success">
+              <div class="stat-value" id="statTotalFine">0.00</div>
+              <div class="stat-label">累计罚金总额</div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel admin-only">
+          <div class="panel-title"><h3>读者欠费排行榜</h3><span>按未缴罚金金额排序</span></div>
+          <div class="table-wrap"><table id="readerFineTable"></table></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title"><h3>当前逾期记录</h3><span>需要尽快归还的图书</span></div>
           <div class="toolbar">
-            <button id="refreshOverdueBtn" class="primary">刷新逾期列表</button>
-            <button id="generateRemindersBtn" class="danger">生成提醒消息</button>
+            <button id="refreshOverdueBtn" class="primary">刷新</button>
+            <button id="generateRemindersBtn" class="danger">生成提醒</button>
           </div>
           <div id="reminderMessages" class="reminder-box"></div>
           <div class="table-wrap"><table id="overdueTable"></table></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title"><h3>未缴纳罚金</h3><span>已归还但未支付罚金的记录</span></div>
+          <div class="table-wrap"><table id="unpaidFinesTable"></table></div>
+          <div class="pager"><button id="finesPrev">上一页</button><span id="finesPageText"></span><button id="finesNext">下一页</button></div>
         </article>
       </section>
 

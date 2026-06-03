@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import HTTPException, status
 
 from .database import db_manager
-from .schemas import BookCreate, BookUpdate, BorrowCreate, ReaderCreate, ReaderUpdate, AnnouncementCreate, AnnouncementUpdate, ReaderImportItem, BookReviewCreate, BookReviewUpdate
+from .schemas import BookCreate, BookUpdate, BorrowCreate, ReaderCreate, ReaderUpdate, AnnouncementCreate, AnnouncementUpdate, ReaderImportItem, BookReviewCreate, BookReviewUpdate, UserCreate, UserUpdate, RenewRequest, ReservationCreate
 from .security import hash_password
 
 
@@ -23,14 +23,23 @@ def normalize_like(keyword: str) -> str:
 
 
 class BookService:
-    def list_books(self, search: str = "", category: str = "", page: int = 1, page_size: int = 10) -> Dict[str, Any]:
+    def list_books(self, search: str = "", category: str = "", isbn: str = "", author: str = "", publisher: str = "", page: int = 1, page_size: int = 10) -> Dict[str, Any]:
         page, page_size, offset = paginate(page, page_size)
         conditions = []
         params: List[Any] = []
         if search.strip():
-            conditions.append("(title LIKE ? OR author LIKE ? OR isbn LIKE ? OR publisher LIKE ?)")
+            conditions.append("(title LIKE ? OR author LIKE ? OR isbn LIKE ? OR publisher LIKE ? OR description LIKE ?)")
             like = normalize_like(search)
-            params.extend([like, like, like, like])
+            params.extend([like, like, like, like, like])
+        if isbn.strip():
+            conditions.append("isbn LIKE ?")
+            params.append(normalize_like(isbn.strip()))
+        if author.strip():
+            conditions.append("author LIKE ?")
+            params.append(normalize_like(author.strip()))
+        if publisher.strip():
+            conditions.append("publisher LIKE ?")
+            params.append(normalize_like(publisher.strip()))
         if category.strip():
             conditions.append("category = ?")
             params.append(category.strip())
@@ -55,14 +64,37 @@ class BookService:
         try:
             book_id = db_manager.execute(
                 """
-                INSERT INTO books(isbn, title, author, publisher, category, total_count, available_count, shelf_location, description)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO books(isbn, title, author, publisher, category, total_count, available_count, shelf_location, description, cover_image)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (data.isbn.strip(), data.title.strip(), data.author.strip(), data.publisher.strip(), data.category.strip(), data.total_count, available, data.shelf_location.strip(), data.description.strip()),
+                (data.isbn.strip(), data.title.strip(), data.author.strip(), data.publisher.strip(), data.category.strip(), data.total_count, available, data.shelf_location.strip(), data.description.strip(), data.cover_image.strip()),
             )
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=400, detail="ISBN 已存在，不能重复添加。")
         return self.get_book(book_id)
+
+    def import_books(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        success_count = 0
+        fail_count = 0
+        errors = []
+        for i, item in enumerate(items):
+            try:
+                book_data = BookCreate(
+                    isbn=str(item.get("isbn", "")).strip(),
+                    title=str(item.get("title", "")).strip(),
+                    author=str(item.get("author", "")).strip(),
+                    publisher=str(item.get("publisher", "")).strip(),
+                    category=str(item.get("category", "")).strip(),
+                    total_count=int(item.get("total_count", 1)),
+                    shelf_location=str(item.get("shelf_location", "")).strip(),
+                    description=str(item.get("description", "")).strip(),
+                )
+                self.create_book(book_data)
+                success_count += 1
+            except Exception as e:
+                fail_count += 1
+                errors.append(f"第 {i+1} 行: {str(e)}")
+        return {"success": success_count, "fail": fail_count, "errors": errors}
 
     def get_book(self, book_id: int) -> Dict[str, Any]:
         book = db_manager.fetch_one("SELECT * FROM books WHERE id = ?", (book_id,))
@@ -225,10 +257,15 @@ class BorrowService:
             raise HTTPException(status_code=400, detail="该记录已经归还。")
         if current_user["role"] == "reader" and record["reader_id"] != current_user["id"]:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能归还自己的借阅记录。")
+        
+        # 计算逾期罚金：每天 0.5 元
+        overdue_days = max(record["overdue_days"], 0)
+        fine_amount = round(overdue_days * 0.5, 2)
+        
         with db_manager.transaction() as conn:
             conn.execute(
-                "UPDATE borrow_records SET status = 'returned', return_date = ? WHERE id = ?",
-                (date.today().isoformat(), record_id),
+                "UPDATE borrow_records SET status = 'returned', return_date = ?, fine_amount = ? WHERE id = ?",
+                (date.today().isoformat(), fine_amount, record_id),
             )
             conn.execute(
                 "UPDATE books SET available_count = available_count + 1, updated_at = datetime('now', 'localtime') WHERE id = ?",
@@ -269,6 +306,120 @@ class BorrowService:
         )
         return {"items": rows, "total": total, "page": page, "page_size": page_size}
 
+    def renew_book(self, record_id: int, data: RenewRequest, current_user: Dict[str, Any]) -> Dict[str, Any]:
+        self._sync_overdue_status()
+        record = self.get_record(record_id, current_user)
+        if record["status"] != "borrowed":
+            raise HTTPException(status_code=400, detail="只有借阅中的图书才能续借。")
+        if current_user["role"] == "reader" and record["reader_id"] != current_user["id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能续借自己的借阅记录。")
+        renew_count = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM borrow_records WHERE book_id = ? AND reader_id = ? AND return_date IS NOT NULL",
+            (record["book_id"], record["reader_id"]),
+        )["n"]
+        if renew_count >= 2:
+            raise HTTPException(status_code=400, detail="该图书最多只能续借2次。")
+        new_due_date = date.fromisoformat(record["due_date"]) + timedelta(days=data.days)
+        db_manager.execute(
+            "UPDATE borrow_records SET due_date = ?, remark = ? WHERE id = ?",
+            (new_due_date.isoformat(), data.remark.strip(), record_id),
+        )
+        return self.get_record(record_id, current_user)
+
+    def reserve_book(self, data: ReservationCreate, current_user: Dict[str, Any]) -> Dict[str, Any]:
+        reader_id = current_user["id"]
+        if current_user["role"] != "reader":
+            raise HTTPException(status_code=400, detail="只有读者才能预约图书。")
+        reader = db_manager.fetch_one("SELECT id, status FROM users WHERE id = ? AND role = 'reader'", (reader_id,))
+        if not reader or reader["status"] != "active":
+            raise HTTPException(status_code=400, detail="读者账号不存在或已冻结。")
+        book = db_manager.fetch_one("SELECT * FROM books WHERE id = ?", (data.book_id,))
+        if not book:
+            raise HTTPException(status_code=404, detail="图书不存在。")
+        if book["available_count"] > 0:
+            raise HTTPException(status_code=400, detail="该图书当前有库存，可直接借阅，无需预约。")
+        active_reserve = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM book_reservations WHERE book_id = ? AND reader_id = ? AND status = 'pending'",
+            (data.book_id, reader_id),
+        )["n"]
+        if active_reserve:
+            raise HTTPException(status_code=400, detail="您已经预约了此书。")
+        active_borrow = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM borrow_records WHERE book_id = ? AND reader_id = ? AND status IN ('borrowed', 'overdue')",
+            (data.book_id, reader_id),
+        )["n"]
+        if active_borrow:
+            raise HTTPException(status_code=400, detail="您正在借阅此书，无法重复预约。")
+        cursor = db_manager.execute(
+            "INSERT INTO book_reservations(book_id, reader_id, reserve_date) VALUES (?, ?, ?)",
+            (data.book_id, reader_id, date.today().isoformat()),
+        )
+        return self.get_reservation(cursor.lastrowid, current_user)
+
+    def get_reservation(self, reservation_id: int, current_user: Dict[str, Any]) -> Dict[str, Any]:
+        row = db_manager.fetch_one(
+            """
+            SELECT r.*, b.title as book_title, b.isbn, u.full_name as reader_name, u.phone as reader_phone
+            FROM book_reservations r
+            JOIN books b ON r.book_id = b.id
+            JOIN users u ON r.reader_id = u.id
+            WHERE r.id = ?
+            """,
+            (reservation_id,),
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="预约记录不存在。")
+        if current_user["role"] == "reader" and row["reader_id"] != current_user["id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看该预约记录。")
+        return row
+
+    def list_reservations(self, current_user: Dict[str, Any], status_filter: str = "", keyword: str = "", page: int = 1, page_size: int = 10) -> Dict[str, Any]:
+        page, page_size, offset = paginate(page, page_size)
+        conditions: List[str] = []
+        params: List[Any] = []
+        if current_user["role"] == "reader":
+            conditions.append("r.reader_id = ?")
+            params.append(current_user["id"])
+        if status_filter.strip():
+            conditions.append("r.status = ?")
+            params.append(status_filter.strip())
+        if keyword.strip():
+            conditions.append("(b.title LIKE ? OR u.full_name LIKE ? OR b.isbn LIKE ?)")
+            like = normalize_like(keyword)
+            params.extend([like, like, like])
+        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
+        total = db_manager.fetch_one(
+            f"""
+            SELECT COUNT(*) AS n FROM book_reservations r
+            JOIN books b ON r.book_id = b.id
+            JOIN users u ON r.reader_id = u.id
+            {where_sql}
+            """,
+            tuple(params),
+        )["n"]
+        rows = db_manager.fetch_all(
+            f"""
+            SELECT r.*, b.title as book_title, b.isbn, u.full_name as reader_name, u.phone as reader_phone
+            FROM book_reservations r
+            JOIN books b ON r.book_id = b.id
+            JOIN users u ON r.reader_id = u.id
+            {where_sql}
+            ORDER BY r.reserve_date DESC, r.id DESC
+            LIMIT ? OFFSET ?
+            """,
+            tuple(params + [page_size, offset]),
+        )
+        return {"items": rows, "total": total, "page": page, "page_size": page_size}
+
+    def cancel_reservation(self, reservation_id: int, current_user: Dict[str, Any]) -> Dict[str, Any]:
+        reservation = self.get_reservation(reservation_id, current_user)
+        if reservation["status"] != "pending":
+            raise HTTPException(status_code=400, detail="只能取消待处理的预约。")
+        if current_user["role"] == "reader" and reservation["reader_id"] != current_user["id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能取消自己的预约。")
+        db_manager.execute("UPDATE book_reservations SET status = 'cancelled' WHERE id = ?", (reservation_id,))
+        return {"message": "预约已取消。"}
+
     def overdue_records(self, current_user: Dict[str, Any]) -> List[Dict[str, Any]]:
         self._sync_overdue_status()
         conditions = ["status = 'overdue'"]
@@ -299,6 +450,116 @@ class BorrowService:
                     reminder_id = cursor.lastrowid
                 created.append({"id": reminder_id, "record_id": item["id"], "message": message})
         return {"total": len(created), "items": created}
+
+    def pay_fine(self, record_id: int, current_user: Dict[str, Any]) -> Dict[str, Any]:
+        """支付罚金"""
+        record = self.get_record(record_id, current_user)
+        if record["status"] != "returned":
+            raise HTTPException(status_code=400, detail="只能支付已归还记录的罚金。")
+        if current_user["role"] == "reader" and record["reader_id"] != current_user["id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能支付自己的罚金。")
+        if record["fine_paid"]:
+            raise HTTPException(status_code=400, detail="该罚金已经支付过了。")
+        
+        db_manager.execute(
+            "UPDATE borrow_records SET fine_paid = 1 WHERE id = ?",
+            (record_id,),
+        )
+        return self.get_record(record_id, current_user)
+
+    def list_unpaid_fines(self, current_user: Dict[str, Any], page: int = 1, page_size: int = 10) -> Dict[str, Any]:
+        """查询未支付罚金的记录"""
+        page, page_size, offset = paginate(page, page_size)
+        conditions = ["status = 'returned'", "fine_amount > 0", "fine_paid = 0"]
+        params: List[Any] = []
+        
+        if current_user["role"] == "reader":
+            conditions.append("reader_id = ?")
+            params.append(current_user["id"])
+        
+        where_sql = " WHERE " + " AND ".join(conditions)
+        total = db_manager.fetch_one(
+            f"SELECT COUNT(*) AS n FROM v_borrow_detail{where_sql}",
+            tuple(params),
+        )["n"]
+        
+        rows = db_manager.fetch_all(
+            f"SELECT * FROM v_borrow_detail{where_sql} ORDER BY due_date ASC LIMIT ? OFFSET ?",
+            tuple(params + [page_size, offset]),
+        )
+        
+        # 计算未支付罚金总额
+        unpaid_total = db_manager.fetch_one(
+            f"SELECT COALESCE(SUM(fine_amount), 0) AS total FROM v_borrow_detail{where_sql}",
+            tuple(params),
+        )["total"]
+        
+        return {"items": rows, "total": total, "page": page, "page_size": page_size, "unpaid_total": unpaid_total}
+
+    def overdue_statistics(self, current_user: Dict[str, Any]) -> Dict[str, Any]:
+        """逾期统计"""
+        if current_user["role"] == "reader":
+            uid = current_user["id"]
+            total_overdue = db_manager.fetch_one(
+                "SELECT COUNT(*) AS n FROM borrow_records WHERE reader_id = ? AND status IN ('overdue', 'returned') AND fine_amount > 0",
+                (uid,)
+            )["n"]
+            unpaid_overdue = db_manager.fetch_one(
+                "SELECT COUNT(*) AS n FROM borrow_records WHERE reader_id = ? AND status = 'returned' AND fine_amount > 0 AND fine_paid = 0",
+                (uid,)
+            )["n"]
+            total_fine = db_manager.fetch_one(
+                "SELECT COALESCE(SUM(fine_amount), 0) AS total FROM borrow_records WHERE reader_id = ?",
+                (uid,)
+            )["total"]
+            unpaid_fine = db_manager.fetch_one(
+                "SELECT COALESCE(SUM(fine_amount), 0) AS total FROM borrow_records WHERE reader_id = ? AND fine_paid = 0",
+                (uid,)
+            )["total"]
+            return {
+                "total_overdue_count": total_overdue,
+                "unpaid_overdue_count": unpaid_overdue,
+                "total_fine": total_fine,
+                "unpaid_fine": unpaid_fine,
+            }
+        
+        # 管理员视角的统计
+        total_overdue = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM borrow_records WHERE status IN ('overdue', 'returned') AND fine_amount > 0"
+        )["n"]
+        unpaid_overdue = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM borrow_records WHERE status = 'returned' AND fine_amount > 0 AND fine_paid = 0"
+        )["n"]
+        current_overdue = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM borrow_records WHERE status = 'overdue'"
+        )["n"]
+        total_fine = db_manager.fetch_one(
+            "SELECT COALESCE(SUM(fine_amount), 0) AS total FROM borrow_records"
+        )["total"]
+        unpaid_fine = db_manager.fetch_one(
+            "SELECT COALESCE(SUM(fine_amount), 0) AS total FROM borrow_records WHERE fine_paid = 0"
+        )["total"]
+        
+        # 按读者分组统计未支付罚金
+        reader_fines = db_manager.fetch_all(
+            """
+            SELECT u.id, u.full_name, u.username, COUNT(*) AS overdue_count, COALESCE(SUM(fine_amount), 0) AS total_fine
+            FROM borrow_records r
+            JOIN users u ON r.reader_id = u.id
+            WHERE r.status = 'returned' AND r.fine_amount > 0 AND r.fine_paid = 0
+            GROUP BY u.id, u.full_name, u.username
+            ORDER BY total_fine DESC
+            """
+        )
+        
+        return {
+            "total_overdue_count": total_overdue,
+            "unpaid_overdue_count": unpaid_overdue,
+            "current_overdue": current_overdue,
+            "total_fine": total_fine,
+            "unpaid_fine": unpaid_fine,
+            "reader_fines": reader_fines,
+        }
 
 
 class StatsService:
@@ -845,3 +1106,214 @@ audit_log_service = AuditLogService()
 book_review_service = BookReviewService()
 reader_bulk_import_service = ReaderBulkImportService()
 recommendation_service = RecommendationService()
+
+
+class UserService:
+    ROLE_PERMISSIONS = {
+        "admin": {
+            "name": "管理员",
+            "permissions": [
+                "manage_users",
+                "manage_books",
+                "manage_borrow",
+                "manage_announcements",
+                "view_stats",
+                "view_reports",
+                "view_audit_logs",
+                "import_export",
+            ],
+        },
+        "librarian": {
+            "name": "馆员",
+            "permissions": [
+                "manage_books",
+                "manage_borrow",
+                "manage_announcements",
+                "view_stats",
+                "view_reports",
+                "import_export",
+            ],
+        },
+        "reader": {
+            "name": "普通读者",
+            "permissions": [
+                "borrow_books",
+                "view_books",
+                "view_reviews",
+                "add_reviews",
+                "view_recommendations",
+            ],
+        },
+    }
+
+    def list_users(
+        self, search: str = "", role: str = "", page: int = 1, page_size: int = 10
+    ) -> Dict[str, Any]:
+        page, page_size, offset = paginate(page, page_size)
+        conditions: List[str] = []
+        params: List[Any] = []
+
+        if search.strip():
+            conditions.append(
+                "(username LIKE ? OR full_name LIKE ? OR phone LIKE ? OR email LIKE ? OR department LIKE ?)"
+            )
+            like = normalize_like(search)
+            params.extend([like, like, like, like, like])
+
+        if role.strip():
+            conditions.append("role = ?")
+            params.append(role.strip())
+
+        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
+
+        total = db_manager.fetch_one(
+            f"SELECT COUNT(*) AS n FROM users{where_sql}", tuple(params)
+        )["n"]
+
+        rows = db_manager.fetch_all(
+            f"""
+            SELECT id, username, role, full_name, phone, email, department, status, created_at
+            FROM users {where_sql}
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
+            """,
+            tuple(params + [page_size, offset]),
+        )
+
+        for row in rows:
+            row["role_name"] = self.ROLE_PERMISSIONS.get(row["role"], {}).get(
+                "name", row["role"]
+            )
+
+        return {"items": rows, "total": total, "page": page, "page_size": page_size}
+
+    def create_user(self, data: UserCreate) -> Dict[str, Any]:
+        try:
+            user_id = db_manager.execute(
+                """
+                INSERT INTO users(username, password_hash, role, full_name, phone, email, department, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    data.username.strip(),
+                    hash_password(data.password),
+                    data.role.strip(),
+                    data.full_name.strip(),
+                    data.phone.strip(),
+                    data.email.strip(),
+                    data.department.strip(),
+                    data.status.strip(),
+                ),
+            )
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=400, detail="用户名已存在。")
+
+        return self.get_user(user_id)
+
+    def get_user(self, user_id: int) -> Dict[str, Any]:
+        row = db_manager.fetch_one(
+            """
+            SELECT id, username, role, full_name, phone, email, department, status, created_at
+            FROM users WHERE id = ?
+            """,
+            (user_id,),
+        )
+
+        if not row:
+            raise HTTPException(status_code=404, detail="用户不存在。")
+
+        row["role_name"] = self.ROLE_PERMISSIONS.get(row["role"], {}).get(
+            "name", row["role"]
+        )
+
+        return row
+
+    def update_user(self, user_id: int, data: UserUpdate) -> Dict[str, Any]:
+        self.get_user(user_id)
+
+        update_data = data.model_dump(exclude_unset=True, exclude_none=True)
+
+        if not update_data:
+            return self.get_user(user_id)
+
+        fields = []
+        params: List[Any] = []
+
+        for key, value in update_data.items():
+            if key == "password":
+                fields.append("password_hash = ?")
+                params.append(hash_password(value))
+            else:
+                fields.append(f"{key} = ?")
+                params.append(value.strip() if isinstance(value, str) else value)
+
+        params.append(user_id)
+
+        db_manager.execute(
+            f"UPDATE users SET {', '.join(fields)} WHERE id = ?", tuple(params)
+        )
+
+        return self.get_user(user_id)
+
+    def delete_user(self, user_id: int) -> Dict[str, str]:
+        user = self.get_user(user_id)
+
+        if user["role"] == "admin":
+            admin_count = db_manager.fetch_one(
+                "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND status = 'active'"
+            )["n"]
+            if admin_count <= 1:
+                raise HTTPException(status_code=400, detail="至少需要保留一个活跃的管理员账户。")
+
+        active_borrows = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM borrow_records WHERE reader_id = ? AND status IN ('borrowed', 'overdue')",
+            (user_id,),
+        )["n"]
+
+        if active_borrows > 0:
+            raise HTTPException(
+                status_code=400, detail="该用户仍有未归还的图书，无法删除。"
+            )
+
+        db_manager.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+        return {"message": "用户已删除。"}
+
+    def get_role_permissions(self, role: str) -> Dict[str, Any]:
+        return self.ROLE_PERMISSIONS.get(role, {"name": role, "permissions": []})
+
+    def list_roles(self) -> List[Dict[str, Any]]:
+        return [
+            {"role": role, "name": details["name"], "permissions": details["permissions"]}
+            for role, details in self.ROLE_PERMISSIONS.items()
+        ]
+
+    def get_user_stats(self) -> Dict[str, Any]:
+        admin_count = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM users WHERE role = 'admin'"
+        )["n"]
+        librarian_count = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM users WHERE role = 'librarian'"
+        )["n"]
+        reader_count = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM users WHERE role = 'reader'"
+        )["n"]
+
+        active_count = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM users WHERE status = 'active'"
+        )["n"]
+        frozen_count = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM users WHERE status = 'frozen'"
+        )["n"]
+
+        return {
+            "admin_count": admin_count,
+            "librarian_count": librarian_count,
+            "reader_count": reader_count,
+            "active_count": active_count,
+            "frozen_count": frozen_count,
+            "total_count": admin_count + librarian_count + reader_count,
+        }
+
+
+user_service = UserService()

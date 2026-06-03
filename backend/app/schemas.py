@@ -43,6 +43,7 @@ class BookCreate(BaseModel):
     available_count: Optional[int] = Field(default=None, ge=0)
     shelf_location: str = Field(default="", max_length=40)
     description: str = Field(default="", max_length=500)
+    cover_image: str = Field(default="", max_length=200)
 
 
 class BookUpdate(BaseModel):
@@ -55,6 +56,28 @@ class BookUpdate(BaseModel):
     available_count: Optional[int] = Field(default=None, ge=0)
     shelf_location: Optional[str] = Field(default=None, max_length=40)
     description: Optional[str] = Field(default=None, max_length=500)
+    cover_image: Optional[str] = Field(default=None, max_length=200)
+
+
+class BookImportItem(BaseModel):
+    isbn: str = Field(..., min_length=3, max_length=40)
+    title: str = Field(..., min_length=1, max_length=120)
+    author: str = Field(..., min_length=1, max_length=80)
+    publisher: str = Field(default="", max_length=80)
+    category: str = Field(..., min_length=1, max_length=40)
+    total_count: int = Field(..., ge=0)
+    shelf_location: str = Field(default="", max_length=40)
+    description: str = Field(default="", max_length=500)
+
+
+class BookSearchRequest(BaseModel):
+    search: str = Field(default="")
+    category: str = Field(default="")
+    isbn: str = Field(default="")
+    author: str = Field(default="")
+    publisher: str = Field(default="")
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=10, ge=1, le=100)
 
 
 class ReaderCreate(BaseModel):
@@ -81,6 +104,19 @@ class BorrowCreate(BaseModel):
     reader_id: Optional[int] = Field(default=None, ge=1)
     days: int = Field(default=30, ge=1, le=180)
     remark: str = Field(default="", max_length=200)
+
+
+class RenewRequest(BaseModel):
+    days: int = Field(default=14, ge=1, le=60)
+    remark: str = Field(default="", max_length=200)
+
+
+class ReservationCreate(BaseModel):
+    book_id: int = Field(..., ge=1)
+
+
+class ReservationUpdate(BaseModel):
+    status: str = Field(default="cancelled", pattern="^(cancelled)$")
 
 
 class ReaderReportItem(BaseModel):
@@ -194,3 +230,42 @@ class AuditLogEntry(BaseModel):
     target_id: Optional[int]
     details: str
     timestamp: str
+
+
+class UserCreate(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6, max_length=100)
+    role: str = Field(..., pattern="^(admin|reader|librarian)$")
+    full_name: str = Field(..., min_length=1, max_length=80)
+    phone: str = Field(default="", max_length=30)
+    email: str = Field(default="", max_length=80)
+    department: str = Field(default="", max_length=80)
+    status: str = Field(default="active", pattern="^(active|frozen)$")
+
+
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    phone: Optional[str] = Field(default=None, max_length=30)
+    email: Optional[str] = Field(default=None, max_length=80)
+    department: Optional[str] = Field(default=None, max_length=80)
+    status: Optional[str] = Field(default=None, pattern="^(active|frozen)$")
+    role: Optional[str] = Field(default=None, pattern="^(admin|reader|librarian)$")
+    password: Optional[str] = Field(default=None, min_length=6, max_length=100)
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    role: str
+    full_name: str
+    phone: str
+    email: str
+    department: str
+    status: str
+    created_at: str
+
+
+class RolePermission(BaseModel):
+    role: str
+    role_name: str
+    permissions: List[str]
