@@ -8,6 +8,31 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=100)
 
 
+class RegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6, max_length=100)
+    full_name: str = Field(..., min_length=1, max_length=80)
+    phone: str = Field(default="", max_length=30)
+    email: str = Field(default="", max_length=80)
+    department: str = Field(default="", max_length=80)
+    verify_code: str = Field(..., min_length=6, max_length=6)
+
+
+class VerifyCodeRequest(BaseModel):
+    phone: str = Field(..., min_length=11, max_length=15)
+
+
+class ForgotPasswordRequest(BaseModel):
+    phone: str = Field(..., min_length=11, max_length=15)
+    verify_code: str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=6, max_length=100)
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(..., min_length=1, max_length=100)
+    new_password: str = Field(..., min_length=6, max_length=100)
+
+
 class BookCreate(BaseModel):
     isbn: str = Field(..., min_length=3, max_length=40)
     title: str = Field(..., min_length=1, max_length=120)

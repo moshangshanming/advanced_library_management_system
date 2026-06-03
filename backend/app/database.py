@@ -102,6 +102,16 @@ class DatabaseManager:
                     FOREIGN KEY(record_id) REFERENCES borrow_records(id) ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS verification_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    phone TEXT NOT NULL,
+                    code TEXT NOT NULL,
+                    purpose TEXT NOT NULL CHECK(purpose IN ('register', 'forgot_password')),
+                    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                    expires_at TEXT NOT NULL,
+                    used INTEGER NOT NULL DEFAULT 0
+                );
+
                 CREATE TABLE IF NOT EXISTS announcements (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     title TEXT NOT NULL,
@@ -137,6 +147,8 @@ class DatabaseManager:
                     FOREIGN KEY(reader_id) REFERENCES users(id) ON DELETE CASCADE
                 );
 
+                CREATE INDEX IF NOT EXISTS idx_vc_phone ON verification_codes(phone);
+                CREATE INDEX IF NOT EXISTS idx_vc_expires ON verification_codes(expires_at);
                 CREATE INDEX IF NOT EXISTS idx_books_title ON books(title);
                 CREATE INDEX IF NOT EXISTS idx_books_category ON books(category);
                 CREATE INDEX IF NOT EXISTS idx_books_isbn ON books(isbn);
