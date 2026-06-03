@@ -223,6 +223,216 @@ tr:hover td { background: rgba(255, 255, 255, 0.4); }
 .top-item .rank { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 12px; background: var(--primary); color: white; font-weight: 700; }
 .reminder-msg { padding: 14px 18px; background: rgba(204, 163, 163, 0.15); color: #9c6060; border-radius: 16px; margin-bottom: 12px;}
 
+/* --- 智能推荐模块样式 --- */
+.recommendations {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.recommendation-section {
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.recommendation-section h4 {
+  margin: 0 0 16px;
+  font-size: 15px;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.recommendation-section h4 .icon {
+  font-size: 18px;
+}
+
+.rec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rec-item {
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.rec-item strong {
+  display: block;
+  color: #334155;
+  margin-bottom: 4px;
+}
+
+/* --- 导入功能样式 --- */
+.import-label {
+  cursor: pointer;
+}
+
+.import-result {
+  margin-top: 16px;
+}
+
+.import-result.hidden {
+  display: none;
+}
+
+/* --- 公告状态徽章 --- */
+.badge.published {
+  background: rgba(158, 187, 161, 0.2);
+  color: #15803d;
+}
+
+.badge.draft {
+  background: rgba(148, 163, 184, 0.2);
+  color: #475569;
+}
+
+.badge.archived {
+  background: rgba(212, 181, 142, 0.2);
+  color: #92400e;
+}
+
+/* --- 操作日志样式 --- */
+.badge.LOGIN {
+  background: rgba(59, 130, 246, 0.2);
+  color: #1d4ed8;
+}
+
+.badge.CREATE {
+  background: rgba(34, 197, 94, 0.2);
+  color: #166534;
+}
+
+.badge.UPDATE {
+  background: rgba(234, 179, 8, 0.2);
+  color: #92400e;
+}
+
+.badge.DELETE {
+  background: rgba(239, 68, 68, 0.2);
+  color: #991b1b;
+}
+
+.badge.BORROW {
+  background: rgba(139, 92, 246, 0.2);
+  color: #6d28d9;
+}
+
+.badge.RETURN {
+  background: rgba(16, 185, 129, 0.2);
+  color: #14532d;
+}
+
+.badge.RESET_PASSWORD {
+  background: rgba(249, 115, 22, 0.2);
+  color: #9a3412;
+}
+
+/* --- 模态框样式 --- */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 480px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #1e293b;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.close-btn:hover {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.modal-body {
+  padding: 24px;
+}
+
+.modal-body p {
+  margin: 0 0 16px;
+  color: #64748b;
+}
+
+.modal-body label {
+  display: block;
+}
+
+.modal-body input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  font-size: 14px;
+  margin-top: 8px;
+  box-sizing: border-box;
+}
+
+.modal-body input:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  border-radius: 0 0 16px 16px;
+}
+
 .toast {
   position: fixed; right: 24px; top: 24px; z-index: 50;
   background: var(--glass-bg); backdrop-filter: blur(20px);

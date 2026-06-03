@@ -112,9 +112,43 @@ class DatabaseManager:
                     used INTEGER NOT NULL DEFAULT 0
                 );
 
+                CREATE TABLE IF NOT EXISTS announcements (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    admin_id INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('draft', 'published', 'archived')),
+                    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                    FOREIGN KEY(admin_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    action TEXT NOT NULL,
+                    target_type TEXT NOT NULL,
+                    target_id INTEGER,
+                    details TEXT DEFAULT '',
+                    timestamp TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS book_reviews (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    book_id INTEGER NOT NULL,
+                    reader_id INTEGER NOT NULL,
+                    rating INTEGER NOT NULL CHECK(rating >= 1 AND rating <= 5),
+                    review_text TEXT DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                    UNIQUE(book_id, reader_id),
+                    FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE,
+                    FOREIGN KEY(reader_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_vc_phone ON verification_codes(phone);
                 CREATE INDEX IF NOT EXISTS idx_vc_expires ON verification_codes(expires_at);
-
                 CREATE INDEX IF NOT EXISTS idx_books_title ON books(title);
                 CREATE INDEX IF NOT EXISTS idx_books_category ON books(category);
                 CREATE INDEX IF NOT EXISTS idx_books_isbn ON books(isbn);
@@ -122,6 +156,13 @@ class DatabaseManager:
                 CREATE INDEX IF NOT EXISTS idx_records_reader_status ON borrow_records(reader_id, status);
                 CREATE INDEX IF NOT EXISTS idx_records_due_date ON borrow_records(due_date);
                 CREATE INDEX IF NOT EXISTS idx_records_book ON borrow_records(book_id);
+                CREATE INDEX IF NOT EXISTS idx_announcements_status ON announcements(status);
+                CREATE INDEX IF NOT EXISTS idx_announcements_created ON announcements(created_at);
+                CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
+                CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+                CREATE INDEX IF NOT EXISTS idx_reviews_book ON book_reviews(book_id);
+                CREATE INDEX IF NOT EXISTS idx_reviews_reader ON book_reviews(reader_id);
 
                 CREATE VIEW IF NOT EXISTS v_borrow_detail AS
                 SELECT
