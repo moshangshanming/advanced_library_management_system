@@ -40,6 +40,8 @@
       <button data-view="records" class="nav">借还记录</button>
       <button data-view="reports" class="nav">读书报告</button>
       <button data-view="overdue" class="nav">逾期提醒</button>
+      <button data-view="announcements" class="nav">公告通知</button>
+      <button data-view="audit" class="nav admin-only">操作日志</button>
     </aside>
 
     <section class="workspace">
@@ -114,7 +116,13 @@
           <div class="toolbar">
             <input id="readerSearch" placeholder="姓名 / 用户名 / 手机 / 邮箱 / 院系" />
             <button id="readerSearchBtn" class="primary">查询</button>
+            <button id="exportReadersBtn" class="ghost">导出 CSV</button>
+            <label class="import-label">
+              <input type="file" id="importReadersFile" accept=".csv" hidden />
+              <button id="importReadersBtn" class="primary">批量导入</button>
+            </label>
           </div>
+          <div id="importResult" class="import-result hidden"></div>
           <form id="readerForm" class="form-grid grid-4">
             <input type="hidden" id="readerId" />
             <label>用户名<input id="readerUsername" required /></label>
@@ -165,6 +173,27 @@
           </div>
         </article>
         <article class="panel">
+          <div class="panel-title"><h3>智能推荐</h3><span>基于您的阅读习惯推荐图书</span></div>
+          <div id="recommendations" class="recommendations">
+            <div class="recommendation-section">
+              <h4><span class="icon">📚</span> 根据历史借阅分类推荐</h4>
+              <div id="recCategory" class="rec-list"></div>
+            </div>
+            <div class="recommendation-section">
+              <h4><span class="icon">🔥</span> 热门借阅榜推荐</h4>
+              <div id="recPopular" class="rec-list"></div>
+            </div>
+            <div class="recommendation-section">
+              <h4><span class="icon">⭐</span> 高分书评推荐</h4>
+              <div id="recRating" class="rec-list"></div>
+            </div>
+            <div class="recommendation-section">
+              <h4><span class="icon">🏫</span> 专业相关推荐</h4>
+              <div id="recDepartment" class="rec-list"></div>
+            </div>
+          </div>
+        </article>
+        <article class="panel">
           <div class="panel-title"><h3>报告预览</h3><span>展示当前读者的借阅与阅读汇总</span></div>
           <div id="reportPreview" class="report-preview"></div>
         </article>
@@ -181,7 +210,67 @@
           <div class="table-wrap"><table id="overdueTable"></table></div>
         </article>
       </section>
+
+      <section id="announcements" class="view">
+        <article class="panel">
+          <div class="panel-title"><h3>公告管理</h3><span>发布通知，所有读者可见</span></div>
+          <div class="toolbar">
+            <select id="announcementStatus"><option value="">全部状态</option><option value="published">已发布</option><option value="draft">草稿</option><option value="archived">已归档</option></select>
+            <button id="listAnnouncementsBtn" class="primary">查询</button>
+          </div>
+        </article>
+
+        <article class="panel admin-only">
+          <div class="panel-title"><h3 id="announcementFormTitle">发布公告</h3><span>管理员可发布新公告</span></div>
+          <form id="announcementForm" class="form-grid">
+            <input type="hidden" id="announcementId" />
+            <label class="span-4">标题<input id="announcementTitle" required /></label>
+            <label class="span-4">内容<textarea id="announcementContent" rows="6" required></textarea></label>
+            <label>状态<select id="announcementStatusSelect"><option value="published">发布</option><option value="draft">保存草稿</option></select></label>
+            <button class="primary" type="submit">保存公告</button>
+            <button id="resetAnnouncementForm" class="ghost" type="button">清空</button>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title"><h3>公告列表</h3><span id="announcementTotalText"></span></div>
+          <div class="table-wrap"><table id="announcementTable"></table></div>
+          <div class="pager"><button id="announcementPrev">上一页</button><span id="announcementPageText"></span><button id="announcementNext">下一页</button></div>
+        </article>
+      </section>
+
+      <section id="audit" class="view">
+        <article class="panel">
+          <div class="panel-title"><h3>操作日志</h3><span>记录所有登录、增删改查、借还书操作</span></div>
+          <div class="toolbar">
+            <input id="auditSearch" placeholder="搜索操作详情" />
+            <select id="auditAction"><option value="">全部操作</option><option value="LOGIN">登录</option><option value="CREATE">创建</option><option value="UPDATE">更新</option><option value="DELETE">删除</option><option value="BORROW">借阅</option><option value="RETURN">归还</option></select>
+            <button id="searchAuditBtn" class="primary">查询</button>
+            <button id="exportAuditBtn" class="ghost">导出 CSV</button>
+          </div>
+          <div class="table-wrap"><table id="auditTable"></table></div>
+          <div class="pager"><button id="auditPrev">上一页</button><span id="auditPageText"></span><button id="auditNext">下一页</button></div>
+        </article>
+      </section>
     </section>
+  </div>
+
+    <!-- 密码重置模态框 -->
+  <div id="passwordModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>重置密码</h3>
+        <button class="close-btn" onclick="closePasswordModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="passwordModalMessage"></p>
+        <label>新密码（至少6位）<input id="newPasswordInput" type="password" placeholder="请输入新密码" /></label>
+      </div>
+      <div class="modal-footer">
+        <button class="ghost" onclick="closePasswordModal()">取消</button>
+        <button class="primary" onclick="confirmPasswordReset()">确认重置</button>
+      </div>
+    </div>
   </div>
 
   <script src="/static/app.js?v=2"></script>

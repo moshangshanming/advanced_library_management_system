@@ -4,6 +4,8 @@ const state = {
   user: null,
   bookPage: 1,
   recordPage: 1,
+  announcementPage: 1,
+  auditPage: 1,
   lastBooks: [],
   lastReaders: [],
   currentReport: null,
@@ -14,11 +16,8 @@ const $ = (id) => document.getElementById(id);
 function toast(message, type = 'info') {
   const el = $('toast');
   el.textContent = message;
-
-  // 核心修复：移除原先硬编码的 style 属性，彻底交由上面新写的明亮级 CSS 类控制
   el.removeAttribute('style');
   el.className = `toast show ${type}`;
-
   setTimeout(() => el.classList.remove('show'), 2600);
 }
 
@@ -88,6 +87,8 @@ function switchView(viewName) {
     records: ['借还记录', '记录每一次借书与还书操作。'],
     reports: ['读书报告', '为读者生成个性化报告并在线预览。'],
     overdue: ['逾期提醒', '发现逾期借阅并生成提醒消息。'],
+    announcements: ['公告通知', '发布和查看系统公告通知。'],
+    audit: ['操作日志', '查看系统操作记录和审计日志。'],
   };
   $('pageTitle').textContent = titleMap[viewName][0];
   $('pageSubtitle').textContent = titleMap[viewName][1];
@@ -95,8 +96,10 @@ function switchView(viewName) {
   if (viewName === 'books') loadBooks();
   if (viewName === 'readers') loadReaders();
   if (viewName === 'records') { loadBorrowOptions(); loadRecords(); }
-  if (viewName === 'reports') loadReportView();
+  if (viewName === 'reports') { loadReportView(); loadRecommendations(); }
   if (viewName === 'overdue') loadOverdue();
+  if (viewName === 'announcements') loadAnnouncements();
+  if (viewName === 'audit') loadAuditLogs();
 }
 
 async function loadDashboard() {
@@ -221,8 +224,93 @@ async function loadReaders() {
   const data = await api(`/api/readers?search=${encodeURIComponent($('readerSearch').value || '')}&page=1&page_size=50`);
   state.lastReaders = data.items;
   $('readerTable').innerHTML = `<thead><tr><th>ID</th><th>用户名</th><th>姓名</th><th>手机</th><th>邮箱</th><th>院系</th><th>状态</th><th>操作</th></tr></thead><tbody>
-    ${data.items.map(r => `<tr><td>${r.id}</td><td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name)}</td><td>${escapeHtml(r.phone)}</td><td>${escapeHtml(r.email)}</td><td>${escapeHtml(r.department)}</td><td>${r.status === 'active' ? '正常' : '冻结'}</td><td><div class="row-actions"><button class="ghost" onclick="editReader(${r.id})">编辑</button><button class="danger" onclick="deleteReader(${r.id})">删除</button></div></td></tr>`).join('')}
+    ${data.items.map(r => `<tr><td>${r.id}</td><td>${escapeHtml(r.username)}</td><td>${escapeHtml(r.full_name)}</td><td>${escapeHtml(r.phone)}</td><td>${escapeHtml(r.email)}</td><td>${escapeHtml(r.department)}</td><td>${r.status === 'active' ? '正常' : '冻结'}</td><td><div class="row-actions"><button class="ghost" onclick="editReader(${r.id})">编辑</button><button class="ghost" onclick="resetReaderPassword(${r.id})">重置密码</button><button class="danger" onclick="deleteReader(${r.id})">删除</button></div></td></tr>`).join('')}
   </tbody>`;
+}
+
+let pendingResetReaderId = null;
+
+function resetReaderPassword(readerId) {
+  const reader = state.lastReaders.find(r => r.id === readerId);
+  if (!reader) return;
+  pendingResetReaderId = readerId;
+  $('passwordModalMessage').textContent = `请为读者 ${reader.full_name} 设置新密码：`;
+  $('newPasswordInput').value = '';
+  $('passwordModal').classList.remove('hidden');
+  $('newPasswordInput').focus();
+}
+
+function closePasswordModal() {
+  $('passwordModal').classList.add('hidden');
+  pendingResetReaderId = null;
+  $('newPasswordInput').value = '';
+}
+
+async function confirmPasswordReset() {
+  const newPassword = $('newPasswordInput').value;
+  if (!newPassword || newPassword.length < 6) {
+    toast('密码至少需要6位', 'error');
+    return;
+  }
+  
+  if (!pendingResetReaderId) return;
+  
+  try {
+    await api(`/api/readers/${pendingResetReaderId}/reset-password`, { 
+      method: 'POST', 
+      body: JSON.stringify({ reader_id: pendingResetReaderId, new_password: newPassword }) 
+    });
+    toast('密码重置成功', 'success');
+    closePasswordModal();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function exportReaders() {
+  try {
+    const csv = await api('/api/readers/export');
+    downloadCsv('读者列表.csv', csv);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function handleImportReaders(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  try {
+    const response = await fetch('/api/readers/import', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${state.token}` },
+      body: formData
+    });
+    const result = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(result.detail || '导入失败');
+    }
+    
+    const resultDiv = $('importResult');
+    resultDiv.classList.remove('hidden');
+    resultDiv.innerHTML = `
+      <div style="padding: 16px; border-radius: 12px; background: rgba(158, 187, 161, 0.15);">
+        <strong>导入结果：</strong>共 ${result.total} 条，成功 ${result.success} 条，失败 ${result.failed} 条
+        ${result.errors.length > 0 ? `<br><strong>错误详情：</strong>${result.errors.map(e => `行 ${e.row}: ${e.error}`).join('<br>')}` : ''}
+      </div>
+    `;
+    
+    loadReaders();
+    toast(`成功导入 ${result.success} 位读者`, 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+  
+  event.target.value = '';
 }
 
 function resetReaderForm() {
@@ -283,10 +371,38 @@ async function loadOverdue() {
 
 async function loadReportView() {
   state.currentReport = null;
-  $('reportPreview').innerHTML = '<p>请点击“生成报告”查看当前读者的阅读汇总。</p>';
+  $('reportPreview').innerHTML = '<p>请点击"生成报告"查看当前读者的阅读汇总。</p>';
   if (state.user.role === 'admin') {
     await loadReportReaders();
   }
+}
+
+async function loadRecommendations() {
+  try {
+    const recs = await api('/api/recommendations');
+    
+    renderRecommendation('recCategory', recs.by_category);
+    renderRecommendation('recPopular', recs.by_popular);
+    renderRecommendation('recRating', recs.by_rating);
+    renderRecommendation('recDepartment', recs.by_department);
+  } catch (e) {
+    console.error('Failed to load recommendations:', e);
+  }
+}
+
+function renderRecommendation(containerId, items) {
+  const container = $(containerId);
+  if (!items || items.length === 0) {
+    container.innerHTML = '<p style="color: #94a3b8; font-size: 13px;">暂无推荐数据</p>';
+    return;
+  }
+  container.innerHTML = items.map(book => `
+    <div class="rec-item">
+      <strong>${escapeHtml(book.title)}</strong>
+      <div>${escapeHtml(book.author)} · ${escapeHtml(book.category)}</div>
+      <div style="color: #94a3b8; font-size: 12px;">ISBN: ${escapeHtml(book.isbn)}</div>
+    </div>
+  `).join('');
 }
 
 async function loadReportReaders() {
@@ -295,7 +411,6 @@ async function loadReportReaders() {
 }
 
 async function loadReport() {
-  console.log('loadReport called');
   try {
     let url = '/api/reports/reader';
     if (state.user.role === 'admin') {
@@ -307,7 +422,6 @@ async function loadReport() {
     state.currentReport = report;
     renderReport(report);
   } catch (err) {
-    console.error('loadReport error', err);
     toast(err.message, 'error');
   }
 }
@@ -338,7 +452,6 @@ function renderReport(report) {
 }
 
 function downloadReport() {
-  console.log('downloadReport called');
   if (!state.currentReport) return toast('请先生成报告再下载', 'error');
   const report = state.currentReport;
   const csvEscape = (value) => {
@@ -389,6 +502,101 @@ function downloadCsv(filename, text) {
   a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
 }
 
+// 公告管理功能
+async function loadAnnouncements() {
+  const status = encodeURIComponent($('announcementStatus').value || '');
+  const data = await api(`/api/announcements?status=${status}&page=${state.announcementPage}&page_size=8`);
+  $('announcementTotalText').textContent = `共 ${data.total} 条`;
+  $('announcementPageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
+  
+  const statusMap = { published: '已发布', draft: '草稿', archived: '已归档' };
+  $('announcementTable').innerHTML = `
+    <thead><tr><th>ID</th><th>标题</th><th>内容预览</th><th>发布人</th><th>状态</th><th>发布时间</th><th>操作</th></tr></thead>
+    <tbody>${data.items.map(item => `
+      <tr>
+        <td>${item.id}</td>
+        <td>${escapeHtml(item.title)}</td>
+        <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(item.content)}</td>
+        <td>${escapeHtml(item.admin_name || '系统')}</td>
+        <td><span class="badge ${item.status}">${statusMap[item.status] || item.status}</span></td>
+        <td>${item.created_at}</td>
+        <td>
+          ${state.user.role === 'admin' ? `
+            <div class="row-actions">
+              <button class="ghost" onclick="editAnnouncement(${item.id})">编辑</button>
+              <button class="danger" onclick="deleteAnnouncement(${item.id})">删除</button>
+            </div>
+          ` : ''}
+        </td>
+      </tr>`).join('')}</tbody>`;
+}
+
+function resetAnnouncementForm() {
+  $('announcementForm').reset();
+  $('announcementId').value = '';
+  $('announcementFormTitle').textContent = '发布公告';
+}
+
+async function editAnnouncement(id) {
+  try {
+    const item = await api(`/api/announcements/${id}`);
+    $('announcementId').value = item.id;
+    $('announcementTitle').value = item.title;
+    $('announcementContent').value = item.content;
+    $('announcementStatusSelect').value = item.status;
+    $('announcementFormTitle').textContent = `编辑公告 #${item.id}`;
+    toast('已填入表单，可修改后保存');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function deleteAnnouncement(id) {
+  if (!confirm('确认删除该公告？')) return;
+  try {
+    await api(`/api/announcements/${id}`, { method: 'DELETE' });
+    toast('删除成功', 'success');
+    loadAnnouncements();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+// 操作日志功能
+async function loadAuditLogs() {
+  const action = encodeURIComponent($('auditAction').value || '');
+  const data = await api(`/api/audit-logs?action=${action}&page=${state.auditPage}&page_size=20`);
+  $('auditPageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
+  
+  const actionMap = {
+    LOGIN: '登录', CREATE: '创建', UPDATE: '更新', DELETE: '删除',
+    BORROW: '借阅', RETURN: '归还', RESET_PASSWORD: '重置密码'
+  };
+  
+  $('auditTable').innerHTML = `
+    <thead><tr><th>ID</th><th>用户</th><th>操作</th><th>目标类型</th><th>目标ID</th><th>详情</th><th>时间</th></tr></thead>
+    <tbody>${data.items.map(item => `
+      <tr>
+        <td>${item.id}</td>
+        <td>${escapeHtml(item.username || '未知')}</td>
+        <td><span class="badge borrowed">${actionMap[item.action] || item.action}</span></td>
+        <td>${escapeHtml(item.target_type)}</td>
+        <td>${item.target_id || '-'}</td>
+        <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(item.details)}</td>
+        <td>${item.timestamp}</td>
+      </tr>`).join('')}</tbody>`;
+}
+
+async function exportAuditLogs() {
+  try {
+    const action = encodeURIComponent($('auditAction').value || '');
+    const csv = await api(`/api/audit-logs/export?action=${action}`);
+    downloadCsv('操作日志.csv', csv);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
 // Event bindings
 $('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -413,43 +621,96 @@ $('bookForm').addEventListener('submit', async (e) => {
   if (payload.available_count !== null && payload.available_count > payload.total_count) return toast('可借数量不能大于馆藏总数', 'error');
   try {
     const id = $('bookId').value;
-    await api(id ? `/api/books/${id}` : '/api/books', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-    toast('图书保存成功', 'success'); resetBookForm(); loadBooks(); loadDashboard();
-  } catch (err) { toast(err.message, 'error'); }
+    const method = id ? 'PUT' : 'POST';
+    const url = id ? `/api/books/${id}` : '/api/books';
+    await api(url, { method, body: JSON.stringify(payload) });
+    toast(id ? '更新成功' : '新增成功', 'success');
+    resetBookForm(); loadBooks();
+  } catch (e) { toast(e.message, 'error'); }
 });
-$('readerSearchBtn').addEventListener('click', loadReaders);
-$('resetReaderForm').addEventListener('click', resetReaderForm);
+$('readerSearchBtn').addEventListener('click', () => loadReaders());
+$('exportReadersBtn').addEventListener('click', exportReaders);
+$('importReadersBtn').addEventListener('click', () => $('importReadersFile').click());
+$('importReadersFile').addEventListener('change', handleImportReaders);
 $('readerForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const id = $('readerId').value;
-  const payload = { full_name: $('readerFullName').value, phone: $('readerPhone').value, email: $('readerEmail').value, department: $('readerDepartment').value, status: $('readerStatus').value };
-  if (!id) { payload.username = $('readerUsername').value; payload.password = $('readerPassword').value; if (!payload.password || payload.password.length < 6) return toast('新增读者密码至少 6 位', 'error'); }
-  else if ($('readerPassword').value) payload.password = $('readerPassword').value;
-  try { await api(id ? `/api/readers/${id}` : '/api/readers', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) }); toast('读者保存成功', 'success'); resetReaderForm(); loadReaders(); loadBorrowOptions(); }
-  catch (err) { toast(err.message, 'error'); }
-});
-$('borrowForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const payload = { book_id: Number($('borrowBook').value), days: Number($('borrowDays').value), remark: $('borrowRemark').value };
-  if (state.user.role === 'admin') payload.reader_id = Number($('borrowReader').value);
-  try { await api('/api/borrow-records', { method: 'POST', body: JSON.stringify(payload) }); toast('借书登记成功', 'success'); loadBorrowOptions(); loadRecords(); loadBooks(); loadDashboard(); }
-  catch (err) { toast(err.message, 'error'); }
+  const payload = {
+    username: $('readerUsername').value, password: $('readerPassword').value, full_name: $('readerFullName').value,
+    status: $('readerStatus').value, phone: $('readerPhone').value, email: $('readerEmail').value, department: $('readerDepartment').value,
+  };
+  if (!id && !payload.password) return toast('新增读者密码不能为空', 'error');
+  try {
+    const method = id ? 'PUT' : 'POST';
+    const url = id ? `/api/readers/${id}` : '/api/readers';
+    await api(url, { method, body: JSON.stringify(payload) });
+    toast(id ? '更新成功' : '新增成功', 'success');
+    resetReaderForm(); loadReaders(); loadBorrowOptions();
+  } catch (e) { toast(e.message, 'error'); }
 });
 $('recordSearchBtn').addEventListener('click', () => { state.recordPage = 1; loadRecords(); });
 $('recordPrev').addEventListener('click', () => { if (state.recordPage > 1) { state.recordPage--; loadRecords(); } });
 $('recordNext').addEventListener('click', () => { state.recordPage++; loadRecords(); });
+$('borrowForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const payload = { book_id: Number($('borrowBook').value), borrow_days: Number($('borrowDays').value), remark: $('borrowRemark').value };
+  if (state.user.role === 'admin') payload.reader_id = Number($('borrowReader').value);
+  try { await api('/api/borrow-records', { method: 'POST', body: JSON.stringify(payload) }); toast('借书成功', 'success'); loadRecords(); loadDashboard(); }
+  catch (e) { toast(e.message, 'error'); }
+});
+$('generateReportBtn').addEventListener('click', loadReport);
+$('downloadReportBtn').addEventListener('click', downloadReport);
 $('refreshOverdueBtn').addEventListener('click', loadOverdue);
 $('generateRemindersBtn').addEventListener('click', async () => {
   try {
-    const data = await api('/api/reminders/generate', { method: 'POST' });
-    $('reminderMessages').innerHTML = data.items.map(x => `<div class="reminder-msg">${escapeHtml(x.message)}</div>`).join('') || '<div class="reminder-msg">暂无需要提醒的逾期记录。</div>';
-    toast(`已生成 ${data.total} 条提醒`, 'success');
-  } catch (err) { toast(err.message, 'error'); }
+    const result = await api('/api/overdue/generate-reminders', { method: 'POST' });
+    $('reminderMessages').innerHTML = result.messages.map(m => `<div class="reminder-msg">${escapeHtml(m)}</div>`).join('');
+    toast('已生成 ' + result.messages.length + ' 条提醒', 'success');
+    loadOverdue();
+  } catch (e) { toast(e.message, 'error'); }
 });
-$('exportBooksBtn').addEventListener('click', async () => downloadCsv('books.csv', await api('/api/export/books')));
-$('exportRecordsBtn').addEventListener('click', async () => downloadCsv('borrow_records.csv', await api('/api/export/borrow-records')));
-$('generateReportBtn').addEventListener('click', loadReport);
-$('downloadReportBtn').addEventListener('click', downloadReport);
-console.log('report buttons bound', $('generateReportBtn'), $('downloadReportBtn'));
+$('exportBooksBtn').addEventListener('click', async () => {
+  try { const csv = await api(`/api/books/export?search=${encodeURIComponent($('bookSearch').value || '')}&category=${encodeURIComponent($('categoryFilter').value || '')}`); downloadCsv('图书列表.csv', csv); }
+  catch (e) { toast(e.message, 'error'); }
+});
+$('exportRecordsBtn').addEventListener('click', async () => {
+  try { const csv = await api(`/api/borrow-records/export?status=${encodeURIComponent($('recordStatus').value || '')}&keyword=${encodeURIComponent($('recordKeyword').value || '')}`); downloadCsv('借还记录.csv', csv); }
+  catch (e) { toast(e.message, 'error'); }
+});
+if ($('resetReaderForm')) $('resetReaderForm').addEventListener('click', resetReaderForm);
 
-initAuth();
+// 公告管理事件绑定
+$('listAnnouncementsBtn').addEventListener('click', () => { state.announcementPage = 1; loadAnnouncements(); });
+$('announcementStatus').addEventListener('change', () => { state.announcementPage = 1; loadAnnouncements(); });
+$('announcementPrev').addEventListener('click', () => { if (state.announcementPage > 1) { state.announcementPage--; loadAnnouncements(); } });
+$('announcementNext').addEventListener('click', () => { state.announcementPage++; loadAnnouncements(); });
+$('resetAnnouncementForm').addEventListener('click', resetAnnouncementForm);
+$('announcementForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = $('announcementId').value;
+  const payload = {
+    title: $('announcementTitle').value,
+    content: $('announcementContent').value,
+    status: $('announcementStatusSelect').value,
+  };
+  try {
+    const method = id ? 'PUT' : 'POST';
+    const url = id ? `/api/announcements/${id}` : '/api/announcements';
+    await api(url, { method, body: JSON.stringify(payload) });
+    toast(id ? '更新成功' : '发布成功', 'success');
+    resetAnnouncementForm();
+    loadAnnouncements();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+});
+
+// 操作日志事件绑定
+$('searchAuditBtn').addEventListener('click', () => { state.auditPage = 1; loadAuditLogs(); });
+$('auditAction').addEventListener('change', () => { state.auditPage = 1; loadAuditLogs(); });
+$('auditPrev').addEventListener('click', () => { if (state.auditPage > 1) { state.auditPage--; loadAuditLogs(); } });
+$('auditNext').addEventListener('click', () => { state.auditPage++; loadAuditLogs(); });
+$('exportAuditBtn').addEventListener('click', exportAuditLogs);
+
+// Initialize on page load
+window.addEventListener('DOMContentLoaded', initAuth);

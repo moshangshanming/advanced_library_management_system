@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import HTTPException, status
 
 from .database import db_manager
-from .schemas import BookCreate, BookUpdate, BorrowCreate, ReaderCreate, ReaderUpdate
+from .schemas import BookCreate, BookUpdate, BorrowCreate, ReaderCreate, ReaderUpdate, AnnouncementCreate, AnnouncementUpdate, ReaderImportItem, BookReviewCreate, BookReviewUpdate
 from .security import hash_password
 
 
@@ -468,3 +468,380 @@ borrow_service = BorrowService()
 stats_service = StatsService()
 export_service = ExportService()
 report_service = ReportService()
+
+
+class AnnouncementService:
+    def list_announcements(self, status_filter: str = "", page: int = 1, page_size: int = 10) -> Dict[str, Any]:
+        page, page_size, offset = paginate(page, page_size)
+        conditions: List[str] = ["a.status != 'draft'"]  # 读者只看已发布的
+        params: List[Any] = []
+        if status_filter.strip():
+            conditions.append("a.status = ?")
+            params.append(status_filter.strip())
+        where_sql = " WHERE " + " AND ".join(conditions)
+        total = db_manager.fetch_one(f"SELECT COUNT(*) AS n FROM announcements a{where_sql}", tuple(params))["n"]
+        rows = db_manager.fetch_all(
+            f"""
+            SELECT a.id, a.title, a.content, a.admin_id, u.full_name AS admin_name, a.status, a.created_at, a.updated_at
+            FROM announcements a
+            LEFT JOIN users u ON a.admin_id = u.id
+            {where_sql}
+            ORDER BY a.created_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            tuple(params + [page_size, offset]),
+        )
+        return {"items": rows, "total": total, "page": page, "page_size": page_size}
+
+    def create_announcement(self, data: AnnouncementCreate, admin_id: int) -> Dict[str, Any]:
+        announcement_id = db_manager.execute(
+            """
+            INSERT INTO announcements(title, content, admin_id, status)
+            VALUES (?, ?, ?, ?)
+            """,
+            (data.title.strip(), data.content.strip(), admin_id, data.status),
+        )
+        return self.get_announcement(announcement_id)
+
+    def get_announcement(self, announcement_id: int) -> Dict[str, Any]:
+        row = db_manager.fetch_one(
+            """
+            SELECT a.id, a.title, a.content, a.admin_id, u.full_name AS admin_name, a.status, a.created_at, a.updated_at
+            FROM announcements a
+            LEFT JOIN users u ON a.admin_id = u.id
+            WHERE a.id = ?
+            """,
+            (announcement_id,),
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="公告不存在。")
+        return row
+
+    def update_announcement(self, announcement_id: int, data: AnnouncementUpdate) -> Dict[str, Any]:
+        self.get_announcement(announcement_id)
+        update_data = data.model_dump(exclude_unset=True, exclude_none=True)
+        if not update_data:
+            return self.get_announcement(announcement_id)
+        fields = []
+        params: List[Any] = []
+        for key, value in update_data.items():
+            fields.append(f"{key} = ?")
+            params.append(value.strip() if isinstance(value, str) else value)
+        fields.append("updated_at = datetime('now', 'localtime')")
+        params.append(announcement_id)
+        db_manager.execute(f"UPDATE announcements SET {', '.join(fields)} WHERE id = ?", tuple(params))
+        return self.get_announcement(announcement_id)
+
+    def delete_announcement(self, announcement_id: int) -> Dict[str, str]:
+        self.get_announcement(announcement_id)
+        db_manager.execute("DELETE FROM announcements WHERE id = ?", (announcement_id,))
+        return {"message": "公告已删除。"}
+
+
+class AuditLogService:
+    def log_action(self, user_id: int, action: str, target_type: str, target_id: Optional[int] = None, details: str = "") -> int:
+        log_id = db_manager.execute(
+            """
+            INSERT INTO audit_logs(user_id, action, target_type, target_id, details)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_id, action, target_type, target_id, details),
+        )
+        return log_id
+
+    def list_logs(self, user_id_filter: Optional[int] = None, action_filter: str = "", page: int = 1, page_size: int = 10) -> Dict[str, Any]:
+        page, page_size, offset = paginate(page, page_size)
+        conditions: List[str] = []
+        params: List[Any] = []
+        if user_id_filter:
+            conditions.append("user_id = ?")
+            params.append(user_id_filter)
+        if action_filter.strip():
+            conditions.append("action = ?")
+            params.append(action_filter.strip())
+        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
+        total = db_manager.fetch_one(f"SELECT COUNT(*) AS n FROM audit_logs{where_sql}", tuple(params))["n"]
+        rows = db_manager.fetch_all(
+            f"""
+            SELECT a.id, a.user_id, u.username, a.action, a.target_type, a.target_id, a.details, a.timestamp
+            FROM audit_logs a
+            LEFT JOIN users u ON a.user_id = u.id
+            {where_sql}
+            ORDER BY a.timestamp DESC
+            LIMIT ? OFFSET ?
+            """,
+            tuple(params + [page_size, offset]),
+        )
+        return {"items": rows, "total": total, "page": page, "page_size": page_size}
+
+    def export_logs(self, user_id_filter: Optional[int] = None, action_filter: str = "") -> str:
+        conditions: List[str] = []
+        params: List[Any] = []
+        if user_id_filter:
+            conditions.append("user_id = ?")
+            params.append(user_id_filter)
+        if action_filter.strip():
+            conditions.append("action = ?")
+            params.append(action_filter.strip())
+        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
+        rows = db_manager.fetch_all(
+            f"""
+            SELECT a.id, a.user_id, u.username, a.action, a.target_type, a.target_id, a.details, a.timestamp
+            FROM audit_logs a
+            LEFT JOIN users u ON a.user_id = u.id
+            {where_sql}
+            ORDER BY a.timestamp DESC
+            """,
+            tuple(params),
+        )
+        return export_service.to_csv(rows)
+
+
+class BookReviewService:
+    def get_book_reviews(self, book_id: int) -> List[Dict[str, Any]]:
+        rows = db_manager.fetch_all(
+            """
+            SELECT br.id, br.book_id, br.reader_id, u.full_name AS reader_name, br.rating, br.review_text, br.created_at, br.updated_at
+            FROM book_reviews br
+            LEFT JOIN users u ON br.reader_id = u.id
+            WHERE br.book_id = ?
+            ORDER BY br.created_at DESC
+            """,
+            (book_id,),
+        )
+        return rows
+
+    def add_review(self, data: BookReviewCreate, reader_id: int) -> Dict[str, Any]:
+        # 检查图书是否存在
+        book = db_manager.fetch_one("SELECT id FROM books WHERE id = ?", (data.book_id,))
+        if not book:
+            raise HTTPException(status_code=404, detail="图书不存在。")
+        
+        # 检查是否已评论过
+        existing = db_manager.fetch_one(
+            "SELECT id FROM book_reviews WHERE book_id = ? AND reader_id = ?",
+            (data.book_id, reader_id),
+        )
+        if existing:
+            # 更新评论
+            db_manager.execute(
+                """
+                UPDATE book_reviews SET rating = ?, review_text = ?, updated_at = datetime('now', 'localtime')
+                WHERE book_id = ? AND reader_id = ?
+                """,
+                (data.rating, data.review_text.strip(), data.book_id, reader_id),
+            )
+            return self.get_review(existing["id"], reader_id)
+        
+        # 新建评论
+        review_id = db_manager.execute(
+            """
+            INSERT INTO book_reviews(book_id, reader_id, rating, review_text)
+            VALUES (?, ?, ?, ?)
+            """,
+            (data.book_id, reader_id, data.rating, data.review_text.strip()),
+        )
+        return self.get_review(review_id, reader_id)
+
+    def get_review(self, review_id: int, reader_id: int) -> Dict[str, Any]:
+        row = db_manager.fetch_one(
+            """
+            SELECT br.id, br.book_id, br.reader_id, u.full_name AS reader_name, br.rating, br.review_text, br.created_at, br.updated_at
+            FROM book_reviews br
+            LEFT JOIN users u ON br.reader_id = u.id
+            WHERE br.id = ? AND br.reader_id = ?
+            """,
+            (review_id, reader_id),
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="评论不存在。")
+        return row
+
+    def get_book_with_reviews(self, book_id: int) -> Dict[str, Any]:
+        book = db_manager.fetch_one("SELECT id, isbn, title, author, category FROM books WHERE id = ?", (book_id,))
+        if not book:
+            raise HTTPException(status_code=404, detail="图书不存在。")
+        
+        reviews = self.get_book_reviews(book_id)
+        avg_rating = None
+        if reviews:
+            avg_rating = round(sum(r["rating"] for r in reviews) / len(reviews), 2)
+        
+        return {
+            **book,
+            "average_rating": avg_rating,
+            "review_count": len(reviews),
+            "reviews": reviews,
+        }
+
+
+class ReaderBulkImportService:
+    def import_readers_csv(self, csv_content: str) -> Dict[str, Any]:
+        """批量导入读者"""
+        lines = csv_content.strip().split('\n')
+        if not lines:
+            raise HTTPException(status_code=400, detail="CSV 文件为空。")
+        
+        reader = csv.DictReader(io.StringIO(csv_content))
+        if not reader.fieldnames:
+            raise HTTPException(status_code=400, detail="CSV 文件格式错误。")
+        
+        results = {
+            "total": 0,
+            "success": 0,
+            "failed": 0,
+            "errors": [],
+        }
+        
+        for idx, row in enumerate(reader, start=2):  # 从第2行开始（第1行是标题）
+            try:
+                item = ReaderImportItem(
+                    username=row.get("username", "").strip(),
+                    password=row.get("password", "").strip(),
+                    full_name=row.get("full_name", "").strip(),
+                    phone=row.get("phone", "").strip(),
+                    email=row.get("email", "").strip(),
+                    department=row.get("department", "").strip(),
+                )
+                reader_service.create_reader(item)
+                results["success"] += 1
+            except ValueError as e:
+                results["failed"] += 1
+                results["errors"].append({"row": idx, "error": str(e)})
+            except HTTPException as e:
+                results["failed"] += 1
+                results["errors"].append({"row": idx, "error": e.detail})
+            except Exception as e:
+                results["failed"] += 1
+                results["errors"].append({"row": idx, "error": str(e)})
+            finally:
+                results["total"] += 1
+        
+        return results
+
+    def export_readers(self) -> str:
+        """导出读者为 CSV"""
+        rows = db_manager.fetch_all(
+            """
+            SELECT id, username, full_name, phone, email, department, status, created_at
+            FROM users WHERE role = 'reader'
+            ORDER BY id
+            """
+        )
+        return export_service.to_csv(rows)
+
+
+class RecommendationService:
+    def recommend_by_category(self, reader_id: int, limit: int = 5) -> List[Dict[str, Any]]:
+        """根据读者历史借阅分类推荐图书"""
+        # 获取读者借阅过的分类
+        borrowed_categories = db_manager.fetch_all(
+            """
+            SELECT DISTINCT b.category FROM books b
+            JOIN borrow_records br ON b.id = br.book_id
+            WHERE br.reader_id = ?
+            """,
+            (reader_id,),
+        )
+        
+        if not borrowed_categories:
+            return []
+        
+        categories = [c["category"] for c in borrowed_categories]
+        placeholders = ",".join("?" * len(categories))
+        
+        # 推荐相同分类且未借阅过的图书
+        rows = db_manager.fetch_all(
+            f"""
+            SELECT DISTINCT b.* FROM books b
+            WHERE b.category IN ({placeholders})
+            AND b.id NOT IN (
+                SELECT book_id FROM borrow_records WHERE reader_id = ?
+            )
+            ORDER BY b.updated_at DESC
+            LIMIT ?
+            """,
+            tuple(categories + [reader_id, limit]),
+        )
+        return rows
+
+    def recommend_by_popular(self, reader_id: int, limit: int = 5) -> List[Dict[str, Any]]:
+        """根据热门借阅榜推荐图书"""
+        rows = db_manager.fetch_all(
+            """
+            SELECT b.* FROM books b
+            LEFT JOIN (
+                SELECT book_id, COUNT(*) as borrow_count
+                FROM borrow_records
+                GROUP BY book_id
+            ) stats ON b.id = stats.book_id
+            WHERE b.id NOT IN (
+                SELECT book_id FROM borrow_records WHERE reader_id = ?
+            )
+            ORDER BY COALESCE(stats.borrow_count, 0) DESC, b.updated_at DESC
+            LIMIT ?
+            """,
+            (reader_id, limit),
+        )
+        return rows
+
+    def recommend_by_rating(self, reader_id: int, limit: int = 5) -> List[Dict[str, Any]]:
+        """根据评分和评论推荐高质量图书"""
+        rows = db_manager.fetch_all(
+            """
+            SELECT b.*, AVG(br.rating) as avg_rating, COUNT(br.id) as review_count
+            FROM books b
+            LEFT JOIN book_reviews br ON b.id = br.book_id
+            WHERE b.id NOT IN (
+                SELECT book_id FROM borrow_records WHERE reader_id = ?
+            )
+            AND br.rating IS NOT NULL
+            GROUP BY b.id
+            ORDER BY avg_rating DESC, review_count DESC
+            LIMIT ?
+            """,
+            (reader_id, limit),
+        )
+        return rows
+
+    def recommend_by_department(self, reader_id: int, limit: int = 5) -> List[Dict[str, Any]]:
+        """根据专业或院系推荐相关书籍"""
+        # 获取读者的部门/专业
+        reader = reader_service.get_reader(reader_id)
+        department = reader.get("department", "").strip()
+        
+        if not department:
+            return []
+        
+        # 推荐该部门其他读者借阅过的图书
+        rows = db_manager.fetch_all(
+            """
+            SELECT DISTINCT b.* FROM books b
+            JOIN borrow_records br ON b.id = br.book_id
+            JOIN users u ON br.reader_id = u.id
+            WHERE u.department = ?
+            AND b.id NOT IN (
+                SELECT book_id FROM borrow_records WHERE reader_id = ?
+            )
+            ORDER BY b.updated_at DESC
+            LIMIT ?
+            """,
+            (department, reader_id, limit),
+        )
+        return rows
+
+    def get_all_recommendations(self, reader_id: int) -> Dict[str, List[Dict[str, Any]]]:
+        """获取所有推荐"""
+        return {
+            "by_category": self.recommend_by_category(reader_id),
+            "by_popular": self.recommend_by_popular(reader_id),
+            "by_rating": self.recommend_by_rating(reader_id),
+            "by_department": self.recommend_by_department(reader_id),
+        }
+
+
+announcement_service = AnnouncementService()
+audit_log_service = AuditLogService()
+book_review_service = BookReviewService()
+reader_bulk_import_service = ReaderBulkImportService()
+recommendation_service = RecommendationService()

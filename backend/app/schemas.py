@@ -89,3 +89,83 @@ class ReaderReport(BaseModel):
     generated_at: str
     summary: ReaderReportSummary
     records: List[ReaderReportItem]
+
+
+class AnnouncementCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    content: str = Field(..., min_length=1, max_length=5000)
+    status: str = Field(default="published", pattern="^(draft|published|archived)$")
+
+
+class AnnouncementUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    content: Optional[str] = Field(default=None, min_length=1, max_length=5000)
+    status: Optional[str] = Field(default=None, pattern="^(draft|published|archived)$")
+
+
+class Announcement(BaseModel):
+    id: int
+    title: str
+    content: str
+    admin_id: int
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class ReaderImportItem(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6, max_length=100)
+    full_name: str = Field(..., min_length=1, max_length=80)
+    phone: str = Field(default="", max_length=30)
+    email: str = Field(default="", max_length=80)
+    department: str = Field(default="", max_length=80)
+
+
+class ResetPasswordRequest(BaseModel):
+    reader_id: int = Field(..., ge=1)
+    new_password: str = Field(..., min_length=6, max_length=100)
+
+
+class BookReviewCreate(BaseModel):
+    book_id: int = Field(..., ge=1)
+    rating: int = Field(..., ge=1, le=5)
+    review_text: str = Field(default="", max_length=2000)
+
+
+class BookReviewUpdate(BaseModel):
+    rating: Optional[int] = Field(default=None, ge=1, le=5)
+    review_text: Optional[str] = Field(default=None, max_length=2000)
+
+
+class BookReview(BaseModel):
+    id: int
+    book_id: int
+    reader_id: int
+    reader_name: str
+    rating: int
+    review_text: str
+    created_at: str
+    updated_at: str
+
+
+class BookWithReviews(BaseModel):
+    id: int
+    isbn: str
+    title: str
+    author: str
+    category: str
+    average_rating: Optional[float]
+    review_count: int
+    reviews: List[BookReview]
+
+
+class AuditLogEntry(BaseModel):
+    id: int
+    user_id: int
+    username: str
+    action: str
+    target_type: str
+    target_id: Optional[int]
+    details: str
+    timestamp: str
