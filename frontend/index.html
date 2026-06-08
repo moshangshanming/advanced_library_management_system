@@ -21,7 +21,7 @@
         <button class="primary full" type="submit">登录系统</button>
       </form>
       <div class="demo-account">
-        <strong>演示账号：</strong>管理员 admin / admin123；读者 reader / reader123
+        <strong>演示账号：</strong>管理员 admin / admin123；馆员 librarian / librarian123；读者 reader / reader123
       </div>
       <div class="login-links">
         <button id="registerLink" class="link-btn">注册账号</button>
@@ -80,11 +80,12 @@
       </div>
       <button data-view="dashboard" class="nav active">数据总览</button>
       <button data-view="books" class="nav">图书管理</button>
-      <button data-view="readers" class="nav admin-only">读者管理</button>
+      <button data-view="readers" class="nav staff-only">读者管理</button>
       <button data-view="records" class="nav">借还记录</button>
+      <button data-view="reservations" class="nav">预约管理</button>
       <button data-view="reports" class="nav">读书报告</button>
-      <button data-view="overdue" class="nav">逾期提醒</button>
-      <button data-view="announcements" class="nav">公告通知</button>
+      <button data-view="overdue" class="nav staff-only">逾期提醒</button>
+      <button data-view="announcements" class="nav staff-only">公告通知</button>
       <button data-view="audit" class="nav admin-only">操作日志</button>
     </aside>
 
@@ -149,8 +150,20 @@
         </article>
 
         <article class="panel">
-          <div class="panel-title"><h3>图书列表</h3><span id="bookTotalText"></span></div>
-          <div class="table-wrap"><table id="bookTable"></table></div>
+          <div class="panel-title"><h3>图书管理</h3><span id="bookTotalText"></span></div>
+          <div class="toolbar">
+            <input id="bookSearch" placeholder="搜索书名、作者、ISBN、出版社" />
+            <select id="categoryFilter">
+              <option value="">全部分类</option>
+            </select>
+            <button id="bookSearchBtn" class="primary">搜索</button>
+            <label class="import-label">
+              <input type="file" id="importBooksFile" accept=".csv" hidden />
+              <button id="importBooksBtn" class="primary">批量导入CSV</button>
+            </label>
+          </div>
+          <div id="importBooksResult" class="import-result hidden"></div>
+          <div id="bookGrid" class="book-grid"></div>
           <div class="pager"><button id="bookPrev">上一页</button><span id="bookPageText"></span><button id="bookNext">下一页</button></div>
         </article>
       </section>
@@ -208,6 +221,19 @@
         </article>
       </section>
 
+      <section id="reservations" class="view">
+        <article class="panel">
+          <div class="panel-title"><h3>预约管理</h3><span>图书预约记录管理</span></div>
+          <div class="toolbar">
+            <input id="reservationKeyword" placeholder="书名 / 读者" />
+            <select id="reservationStatus"><option value="">全部状态</option><option value="pending">待处理</option><option value="notified">已通知</option><option value="cancelled">已取消</option></select>
+            <button id="reservationSearchBtn" class="primary">查询</button>
+          </div>
+          <div class="table-wrap"><table id="reservationTable"></table></div>
+          <div class="pager"><button id="reservationPrev">上一页</button><span id="reservationPageText"></span><button id="reservationNext">下一页</button></div>
+        </article>
+      </section>
+
       <section id="reports" class="view">
         <article class="panel">
           <div class="panel-title"><h3>读者个性化读书报告</h3><span>支持在线预览与下载报告</span></div>
@@ -245,14 +271,49 @@
       </section>
 
       <section id="overdue" class="view">
+        <div class="grid grid-cols-4 gap-4 mb-4">
+          <div class="stat-card">
+            <div class="stat-value" id="overdueTotal">0</div>
+            <div class="stat-label">逾期总数</div>
+          </div>
+          <div class="stat-card warning">
+            <div class="stat-value" id="overdue7Days">0</div>
+            <div class="stat-label">逾期7天内</div>
+          </div>
+          <div class="stat-card danger">
+            <div class="stat-value" id="overdue14Days">0</div>
+            <div class="stat-label">逾期14天以上</div>
+          </div>
+          <div class="stat-card info">
+            <div class="stat-value" id="overdueTotalFine">¥0.00</div>
+            <div class="stat-label">预估总罚金</div>
+          </div>
+        </div>
+        
         <article class="panel">
           <div class="panel-title"><h3>逾期提醒中心</h3><span>自动扫描逾期记录并生成提醒消息</span></div>
           <div class="toolbar">
-            <button id="refreshOverdueBtn" class="primary">刷新逾期列表</button>
-            <button id="generateRemindersBtn" class="danger">生成提醒消息</button>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+              <input id="overdueKeyword" placeholder="图书 / 读者" />
+              <select id="overdueSort">
+                <option value="due_date_asc">应还日期↑</option>
+                <option value="due_date_desc">应还日期↓</option>
+                <option value="overdue_days_desc">逾期天数↓</option>
+                <option value="fine_desc">罚金金额↓</option>
+              </select>
+              <button id="refreshOverdueBtn" class="primary">刷新逾期列表</button>
+              <button id="generateRemindersBtn" class="danger">生成提醒消息</button>
+              <button id="batchNotifyBtn" class="primary">批量发送通知</button>
+              <button id="exportOverdueBtn" class="ghost">导出逾期报表</button>
+            </div>
           </div>
           <div id="reminderMessages" class="reminder-box"></div>
           <div class="table-wrap"><table id="overdueTable"></table></div>
+          <div class="pagination-bar">
+            <button id="overduePrev" class="pagination-btn" onclick="if (overduePage > 1) { overduePage--; loadOverdue(); }">上一页</button>
+            <span id="overduePageText">第 1 页 / 共 1 页</span>
+            <button id="overdueNext" class="pagination-btn" onclick="overduePage++; loadOverdue();">下一页</button>
+          </div>
         </article>
       </section>
 
@@ -298,6 +359,43 @@
         </article>
       </section>
     </section>
+  </div>
+
+    <!-- 书籍详情模态框 -->
+  <div id="bookDetailModal" class="modal hidden">
+    <div class="modal-content book-detail-content">
+      <div class="modal-header">
+        <h3>图书详情</h3>
+        <button class="close-btn" onclick="closeBookDetailModal()">&times;</button>
+      </div>
+      <div class="modal-body book-detail-body">
+        <div class="book-detail-cover">
+          <img id="detailCover" src="/static/placeholder-cover.png" alt="图书封面" />
+          <label id="detailCoverUpload" class="detail-cover-upload hidden"><input type="file" accept="image/*" onchange="uploadDetailCover(this)" /><span>更换封面</span></label>
+        </div>
+        <div class="book-detail-info">
+          <h2 id="detailTitle">书名</h2>
+          <p id="detailAuthor" class="detail-author">作者</p>
+          <div class="detail-meta">
+            <p><strong>ISBN:</strong> <span id="detailIsbn"></span></p>
+            <p><strong>出版社:</strong> <span id="detailPublisher"></span></p>
+            <p><strong>分类:</strong> <span id="detailCategory"></span></p>
+            <p><strong>书架位置:</strong> <span id="detailShelf"></span></p>
+            <p><strong>库存:</strong> <span id="detailStock"></span></p>
+            <p><strong>借阅次数:</strong> <span id="detailBorrowCount"></span></p>
+          </div>
+          <div class="detail-description">
+            <strong>简介:</strong>
+            <p id="detailDescription">暂无简介</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="ghost" onclick="closeBookDetailModal()">关闭</button>
+        <button id="detailBorrowBtn" class="primary" onclick="quickBorrowFromDetail()">借阅</button>
+        <button id="detailReserveBtn" class="ghost hidden" onclick="reserveBookFromDetail()">预约</button>
+      </div>
+    </div>
   </div>
 
     <!-- 修改密码模态框 -->

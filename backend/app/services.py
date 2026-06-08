@@ -22,6 +22,73 @@ def normalize_like(keyword: str) -> str:
     return f"%{keyword.strip()}%"
 
 
+class AuditLogService:
+    def log_action(self, user_id: int, action: str, target_type: str, target_id: Optional[int] = None, details: str = "") -> int:
+        log_id = db_manager.execute(
+            """
+            INSERT INTO audit_logs(user_id, action, target_type, target_id, details)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_id, action, target_type, target_id, details),
+        )
+        return log_id
+
+    def list_logs(self, user_id_filter: Optional[int] = None, action_filter: str = "", page: int = 1, page_size: int = 10) -> Dict[str, Any]:
+        page, page_size, offset = paginate(page, page_size)
+        conditions: List[str] = []
+        params: List[Any] = []
+        if user_id_filter:
+            conditions.append("user_id = ?")
+            params.append(user_id_filter)
+        if action_filter.strip():
+            conditions.append("action = ?")
+            params.append(action_filter.strip())
+        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
+        total = db_manager.fetch_one(f"SELECT COUNT(*) AS n FROM audit_logs{where_sql}", tuple(params))["n"]
+        rows = db_manager.fetch_all(
+            f"""
+            SELECT a.id, a.user_id, u.username, a.action, a.target_type, a.target_id, a.details, a.timestamp
+            FROM audit_logs a
+            LEFT JOIN users u ON a.user_id = u.id
+            {where_sql}
+            ORDER BY a.timestamp DESC
+            LIMIT ? OFFSET ?
+            """,
+            tuple(params + [page_size, offset]),
+        )
+        return {"items": rows, "total": total, "page": page, "page_size": page_size}
+
+    def export_logs(self, user_id_filter: Optional[int] = None, action_filter: str = "") -> str:
+        conditions: List[str] = []
+        params: List[Any] = []
+        if user_id_filter:
+            conditions.append("user_id = ?")
+            params.append(user_id_filter)
+        if action_filter.strip():
+            conditions.append("action = ?")
+            params.append(action_filter.strip())
+        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
+        rows = db_manager.fetch_all(
+            f"""
+            SELECT a.id, u.username, a.action, a.target_type, a.target_id, a.details, a.timestamp
+            FROM audit_logs a
+            LEFT JOIN users u ON a.user_id = u.id
+            {where_sql}
+            ORDER BY a.timestamp DESC
+            """,
+            tuple(params),
+        )
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["ID", "操作员", "操作类型", "目标类型", "目标ID", "详情", "时间"])
+        for row in rows:
+            writer.writerow([row["id"], row["username"], row["action"], row["target_type"], row["target_id"], row["details"], row["timestamp"]])
+        return output.getvalue()
+
+
+audit_log_service = AuditLogService()
+
+
 class BookService:
     def list_books(self, search: str = "", category: str = "", page: int = 1, page_size: int = 10) -> Dict[str, Any]:
         page, page_size, offset = paginate(page, page_size)
@@ -180,8 +247,20 @@ class ReaderService:
 
 class BorrowService:
     def _sync_overdue_status(self) -> None:
+        """同步逾期状态并自动计算罚金"""
         today = date.today().isoformat()
+        
+        # 更新状态为逾期
         db_manager.execute("UPDATE borrow_records SET status = 'overdue' WHERE status = 'borrowed' AND due_date < ?", (today,))
+        
+        # 获取所有逾期记录
+        overdue_records = db_manager.fetch_all("SELECT * FROM v_borrow_detail WHERE status = 'overdue'")
+        
+        # 为每条逾期记录计算并更新罚金
+        for record in overdue_records:
+            fine_amount = self._calculate_fine(record)
+            if fine_amount > 0:
+                db_manager.execute("UPDATE borrow_records SET fine_amount = ? WHERE id = ?", (fine_amount, record["id"]))
 
     def borrow_book(self, data: BorrowCreate, current_user: Dict[str, Any]) -> Dict[str, Any]:
         reader_id = data.reader_id
@@ -225,10 +304,14 @@ class BorrowService:
             raise HTTPException(status_code=400, detail="该记录已经归还。")
         if current_user["role"] == "reader" and record["reader_id"] != current_user["id"]:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能归还自己的借阅记录。")
+        
+        # 计算逾期罚金
+        fine_amount = self._calculate_fine(record)
+        
         with db_manager.transaction() as conn:
             conn.execute(
-                "UPDATE borrow_records SET status = 'returned', return_date = ? WHERE id = ?",
-                (date.today().isoformat(), record_id),
+                "UPDATE borrow_records SET status = 'returned', return_date = ?, fine_amount = ? WHERE id = ?",
+                (date.today().isoformat(), fine_amount, record_id),
             )
             conn.execute(
                 "UPDATE books SET available_count = available_count + 1, updated_at = datetime('now', 'localtime') WHERE id = ?",
@@ -236,6 +319,50 @@ class BorrowService:
             )
             conn.execute("UPDATE reminders SET resolved = 1 WHERE record_id = ?", (record_id,))
         return self.get_record(record_id, current_user)
+
+    def _calculate_fine(self, record: Dict[str, Any]) -> float:
+        """计算逾期罚金"""
+        overdue_days = int(record.get("overdue_days", 0))
+        if overdue_days <= 0:
+            return 0.0
+        
+        price = float(record.get("price", 0))
+        if price <= 0:
+            # 如果没有定价，使用默认每天0.1元
+            daily_fine = 0.1
+            max_fine = 20.0  # 最大罚金20元
+        else:
+            # 罚金 = 定价 * 0.05 * 逾期天数，上限为定价的2倍
+            daily_fine = price * 0.05
+            max_fine = price * 2
+        
+        fine = daily_fine * overdue_days
+        return round(min(fine, max_fine), 2)
+
+    def pay_fine(self, record_id: int, current_user: Dict[str, Any]) -> Dict[str, Any]:
+        """缴纳罚金"""
+        record = self.get_record(record_id, current_user)
+        if current_user["role"] == "reader" and record["reader_id"] != current_user["id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能缴纳自己的罚金。")
+        if record["fine_paid"] == 1:
+            raise HTTPException(status_code=400, detail="该罚金已缴纳。")
+        if record["fine_amount"] <= 0:
+            raise HTTPException(status_code=400, detail="没有需要缴纳的罚金。")
+        
+        db_manager.execute(
+            "UPDATE borrow_records SET fine_paid = 1 WHERE id = ?",
+            (record_id,)
+        )
+        
+        audit_log_service.log_action(
+            user_id=current_user["id"],
+            action="PAY_FINE",
+            target_type="borrow_record",
+            target_id=record_id,
+            details=f"缴纳罚金: {record['fine_amount']}元"
+        )
+        
+        return {"message": f"罚金缴纳成功，金额: {record['fine_amount']}元", "fine_amount": record["fine_amount"]}
 
     def get_record(self, record_id: int, current_user: Dict[str, Any]) -> Dict[str, Any]:
         self._sync_overdue_status()
@@ -245,6 +372,11 @@ class BorrowService:
         if current_user["role"] == "reader" and row["reader_id"] != current_user["id"]:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看该借阅记录。")
         return row
+
+    def get_book_borrow_count(self, book_id: int) -> int:
+        """获取某本书的借阅次数"""
+        result = db_manager.fetch_one("SELECT COUNT(*) AS count FROM borrow_records WHERE book_id = ?", (book_id,))
+        return result["count"] if result else 0
 
     def list_records(self, current_user: Dict[str, Any], status_filter: str = "", keyword: str = "", page: int = 1, page_size: int = 10) -> Dict[str, Any]:
         self._sync_overdue_status()
@@ -281,6 +413,50 @@ class BorrowService:
             tuple(params),
         )
 
+    def overdue_records_paginated(
+        self, current_user: Dict[str, Any], sort: str = "due_date_asc", keyword: str = "", page: int = 1, page_size: int = 10
+    ) -> Dict[str, Any]:
+        """分页查询逾期记录"""
+        self._sync_overdue_status()
+        page, page_size, offset = paginate(page, page_size)
+        
+        # 处理排序
+        sort_map = {
+            "due_date_asc": "due_date ASC",
+            "due_date_desc": "due_date DESC",
+            "overdue_days_desc": "overdue_days DESC",
+            "fine_desc": "fine_amount DESC",
+        }
+        order_by = sort_map.get(sort, "due_date ASC")
+        
+        # 处理条件 - 显示所有逾期过的记录（包括已归还但有逾期历史的）
+        conditions = ["overdue_days > 0"]
+        params: List[Any] = []
+        
+        if current_user["role"] == "reader":
+            conditions.append("reader_id = ?")
+            params.append(current_user["id"])
+        
+        if keyword.strip():
+            conditions.append("(book_title LIKE ? OR reader_name LIKE ?)")
+            like = normalize_like(keyword)
+            params.extend([like, like])
+        
+        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
+        
+        total = db_manager.fetch_one(f"SELECT COUNT(*) AS n FROM v_borrow_detail{where_sql}", tuple(params))["n"]
+        rows = db_manager.fetch_all(
+            f"SELECT * FROM v_borrow_detail{where_sql} ORDER BY {order_by} LIMIT ? OFFSET ?",
+            tuple(params + [page_size, offset]),
+        )
+        
+        # 获取提醒消息列表
+        messages = db_manager.fetch_all(
+            "SELECT id, message, created_at FROM reminders WHERE resolved = 0 ORDER BY created_at DESC LIMIT 5"
+        )
+        
+        return {"items": rows, "total": total, "page": page, "page_size": page_size, "messages": messages}
+
     def generate_reminders(self, current_user: Dict[str, Any]) -> Dict[str, Any]:
         overdue = self.overdue_records(current_user)
         created = []
@@ -299,6 +475,177 @@ class BorrowService:
                     reminder_id = cursor.lastrowid
                 created.append({"id": reminder_id, "record_id": item["id"], "message": message})
         return {"total": len(created), "items": created}
+
+    def send_reminder(self, record_id: int, current_user: Dict[str, Any]) -> Dict[str, Any]:
+        """发送提醒通知（根据借阅记录id）"""
+        # 获取借阅记录详情
+        record = db_manager.fetch_one("SELECT * FROM v_borrow_detail WHERE id = ?", (record_id,))
+        if not record:
+            raise HTTPException(status_code=404, detail="借阅记录不存在。")
+        
+        # 获取或创建提醒记录
+        reminder = db_manager.fetch_one("SELECT id FROM reminders WHERE record_id = ? AND resolved = 0", (record_id,))
+        if not reminder:
+            # 创建提醒记录
+            message = f"提醒：{record['reader_name']} 借阅的《{record['book_title']}》已逾期 {max(int(record['overdue_days']), 1)} 天，请尽快归还。"
+            reminder_id = db_manager.execute("INSERT INTO reminders(record_id, message) VALUES (?, ?)", (record_id, message))
+        else:
+            reminder_id = reminder["id"]
+        
+        # 更新状态为已通知
+        db_manager.execute("UPDATE reminders SET notified = 1, notified_at = datetime('now', 'localtime') WHERE id = ?", (reminder_id,))
+        
+        audit_log_service.log_action(
+            user_id=current_user["id"],
+            action="SEND_REMINDER",
+            target_type="reminder",
+            target_id=reminder_id,
+            details=f"向读者 {record['reader_name']} 发送逾期提醒"
+        )
+        
+        return {"message": f"提醒通知已发送给读者 {record['reader_name']}"}
+
+    def renew_book(self, record_id: int, days: int, current_user: Dict[str, Any]) -> Dict[str, Any]:
+        """续借图书"""
+        record = self.get_record(record_id, current_user)
+        if record["status"] == "returned":
+            raise HTTPException(status_code=400, detail="该记录已经归还，无法续借。")
+        if current_user["role"] == "reader" and record["reader_id"] != current_user["id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能续借自己的借阅记录。")
+        
+        # 检查续借次数限制（最多续借2次）
+        renew_count = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM borrow_records WHERE book_id = ? AND reader_id = ? AND status = 'returned'",
+            (record["book_id"], record["reader_id"])
+        )["n"]
+        if renew_count >= 2:
+            raise HTTPException(status_code=400, detail="该图书最多只能续借2次。")
+        
+        # 更新借阅记录，延长到期日期
+        db_manager.execute(
+            "UPDATE borrow_records SET due_date = date(due_date, ?), remark = COALESCE(remark || '; ', '') || ? WHERE id = ?",
+            (f'+{days} days', f'续借{days}天', record_id)
+        )
+        
+        return self.get_record(record_id, current_user)
+
+    def create_reservation(self, book_id: int, reader_id: int, current_user: Dict[str, Any]) -> Dict[str, Any]:
+        """创建预约"""
+        # 确定读者ID
+        if current_user["role"] == "reader":
+            reader_id = current_user["id"]
+        if not reader_id:
+            raise HTTPException(status_code=400, detail="管理员预约时必须选择读者。")
+        
+        # 检查读者是否存在
+        reader = db_manager.fetch_one("SELECT id, status FROM users WHERE id = ? AND role = 'reader'", (reader_id,))
+        if not reader:
+            raise HTTPException(status_code=404, detail="读者不存在。")
+        if reader["status"] != "active":
+            raise HTTPException(status_code=400, detail="该读者账号已冻结，不能预约。")
+        
+        # 检查图书是否存在
+        book = db_manager.fetch_one("SELECT * FROM books WHERE id = ?", (book_id,))
+        if not book:
+            raise HTTPException(status_code=404, detail="图书不存在。")
+        
+        # 如果图书有库存，直接借阅，不需要预约
+        if book["available_count"] > 0:
+            raise HTTPException(status_code=400, detail="该图书当前有库存，可直接借阅，无需预约。")
+        
+        # 检查是否已经预约
+        existing = db_manager.fetch_one(
+            "SELECT id FROM book_reservations WHERE book_id = ? AND reader_id = ? AND status = 'pending'",
+            (book_id, reader_id)
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail="您已经预约了这本图书。")
+        
+        # 创建预约记录
+        cursor = db_manager.execute(
+            "INSERT INTO book_reservations(book_id, reader_id, reserve_date, status, notified) VALUES (?, ?, ?, 'pending', 0)",
+            (book_id, reader_id, date.today().isoformat())
+        )
+        reservation_id = cursor.lastrowid
+        
+        return self.get_reservation(reservation_id)
+
+    def get_reservation(self, reservation_id: int) -> Dict[str, Any]:
+        """获取预约记录详情"""
+        row = db_manager.fetch_one("""
+            SELECT r.*, b.title AS book_title, u.username AS reader_username, u.full_name AS reader_name
+            FROM book_reservations r
+            JOIN books b ON r.book_id = b.id
+            JOIN users u ON r.reader_id = u.id
+            WHERE r.id = ?
+        """, (reservation_id,))
+        if not row:
+            raise HTTPException(status_code=404, detail="预约记录不存在。")
+        return row
+
+    def list_reservations(self, current_user: Dict[str, Any], status_filter: str = "", keyword: str = "", page: int = 1, page_size: int = 10) -> Dict[str, Any]:
+        """列出预约记录"""
+        page, page_size, offset = paginate(page, page_size)
+        conditions: List[str] = []
+        params: List[Any] = []
+        
+        if current_user["role"] == "reader":
+            conditions.append("r.reader_id = ?")
+            params.append(current_user["id"])
+        if status_filter.strip():
+            conditions.append("r.status = ?")
+            params.append(status_filter.strip())
+        if keyword.strip():
+            conditions.append("(b.title LIKE ? OR u.username LIKE ? OR u.full_name LIKE ?)")
+            like = normalize_like(keyword)
+            params.extend([like, like, like])
+        
+        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
+        total = db_manager.fetch_one(f"""
+            SELECT COUNT(*) AS n FROM book_reservations r
+            JOIN books b ON r.book_id = b.id
+            JOIN users u ON r.reader_id = u.id
+            {where_sql}
+        """, tuple(params))["n"]
+        
+        rows = db_manager.fetch_all(f"""
+            SELECT r.*, b.title AS book_title, u.username AS reader_username, u.full_name AS reader_name
+            FROM book_reservations r
+            JOIN books b ON r.book_id = b.id
+            JOIN users u ON r.reader_id = u.id
+            {where_sql}
+            ORDER BY r.reserve_date ASC
+            LIMIT ? OFFSET ?
+        """, tuple(params + [page_size, offset]))
+        
+        return {"items": rows, "total": total, "page": page, "page_size": page_size}
+
+    def cancel_reservation(self, reservation_id: int, current_user: Dict[str, Any]) -> Dict[str, Any]:
+        """取消预约"""
+        reservation = self.get_reservation(reservation_id)
+        if current_user["role"] == "reader" and reservation["reader_id"] != current_user["id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能取消自己的预约。")
+        if reservation["status"] != "pending":
+            raise HTTPException(status_code=400, detail="该预约已完成或已取消，无法取消。")
+        
+        db_manager.execute("UPDATE book_reservations SET status = 'cancelled' WHERE id = ?", (reservation_id,))
+        return {"message": "预约已取消。"}
+
+    def process_reservations(self, book_id: int) -> None:
+        """处理预约（当图书归还时自动通知预约用户）"""
+        # 获取该图书的所有待处理预约
+        reservations = db_manager.fetch_all("""
+            SELECT r.* FROM book_reservations r
+            WHERE r.book_id = ? AND r.status = 'pending'
+            ORDER BY r.reserve_date ASC
+        """, (book_id,))
+        
+        if reservations:
+            # 更新第一个预约为已通知状态
+            db_manager.execute(
+                "UPDATE book_reservations SET status = 'notified', notified = 1 WHERE id = ?",
+                (reservations[0]["id"],)
+            )
 
 
 class StatsService:
@@ -373,9 +720,10 @@ class StatsService:
     def top_books(self) -> List[Dict[str, Any]]:
         return db_manager.fetch_all(
             """
-            SELECT b.title, b.category, COUNT(r.id) AS borrow_count
+            SELECT b.id, b.title, b.author, b.category, b.cover_image, b.description, COUNT(r.id) AS borrow_count
             FROM borrow_records r JOIN books b ON r.book_id = b.id
             GROUP BY b.id
+            HAVING COUNT(r.id) > 0
             ORDER BY borrow_count DESC, b.title ASC
             LIMIT 10
             """
@@ -536,65 +884,6 @@ class AnnouncementService:
         self.get_announcement(announcement_id)
         db_manager.execute("DELETE FROM announcements WHERE id = ?", (announcement_id,))
         return {"message": "公告已删除。"}
-
-
-class AuditLogService:
-    def log_action(self, user_id: int, action: str, target_type: str, target_id: Optional[int] = None, details: str = "") -> int:
-        log_id = db_manager.execute(
-            """
-            INSERT INTO audit_logs(user_id, action, target_type, target_id, details)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (user_id, action, target_type, target_id, details),
-        )
-        return log_id
-
-    def list_logs(self, user_id_filter: Optional[int] = None, action_filter: str = "", page: int = 1, page_size: int = 10) -> Dict[str, Any]:
-        page, page_size, offset = paginate(page, page_size)
-        conditions: List[str] = []
-        params: List[Any] = []
-        if user_id_filter:
-            conditions.append("user_id = ?")
-            params.append(user_id_filter)
-        if action_filter.strip():
-            conditions.append("action = ?")
-            params.append(action_filter.strip())
-        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
-        total = db_manager.fetch_one(f"SELECT COUNT(*) AS n FROM audit_logs{where_sql}", tuple(params))["n"]
-        rows = db_manager.fetch_all(
-            f"""
-            SELECT a.id, a.user_id, u.username, a.action, a.target_type, a.target_id, a.details, a.timestamp
-            FROM audit_logs a
-            LEFT JOIN users u ON a.user_id = u.id
-            {where_sql}
-            ORDER BY a.timestamp DESC
-            LIMIT ? OFFSET ?
-            """,
-            tuple(params + [page_size, offset]),
-        )
-        return {"items": rows, "total": total, "page": page, "page_size": page_size}
-
-    def export_logs(self, user_id_filter: Optional[int] = None, action_filter: str = "") -> str:
-        conditions: List[str] = []
-        params: List[Any] = []
-        if user_id_filter:
-            conditions.append("user_id = ?")
-            params.append(user_id_filter)
-        if action_filter.strip():
-            conditions.append("action = ?")
-            params.append(action_filter.strip())
-        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
-        rows = db_manager.fetch_all(
-            f"""
-            SELECT a.id, a.user_id, u.username, a.action, a.target_type, a.target_id, a.details, a.timestamp
-            FROM audit_logs a
-            LEFT JOIN users u ON a.user_id = u.id
-            {where_sql}
-            ORDER BY a.timestamp DESC
-            """,
-            tuple(params),
-        )
-        return export_service.to_csv(rows)
 
 
 class BookReviewService:
@@ -841,7 +1130,6 @@ class RecommendationService:
 
 
 announcement_service = AnnouncementService()
-audit_log_service = AuditLogService()
 book_review_service = BookReviewService()
 reader_bulk_import_service = ReaderBulkImportService()
 recommendation_service = RecommendationService()

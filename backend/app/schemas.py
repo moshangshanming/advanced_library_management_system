@@ -174,6 +174,27 @@ class BookReview(BaseModel):
     updated_at: str
 
 
+class RenewRequest(BaseModel):
+    days: int = Field(default=15, ge=1, le=90)
+
+
+class ReservationCreate(BaseModel):
+    book_id: int = Field(..., ge=1)
+    reader_id: Optional[int] = Field(default=None, ge=1)
+
+
+class Reservation(BaseModel):
+    id: int
+    book_id: int
+    book_title: str
+    reader_id: int
+    reader_name: str
+    reader_username: str
+    reserve_date: str
+    status: str
+    notified: int
+
+
 class BookWithReviews(BaseModel):
     id: int
     isbn: str

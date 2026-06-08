@@ -1,3 +1,6 @@
+import csv
+import io
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -6,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import APP_NAME, APP_VERSION, FRONTEND_DIR
+from .config import APP_NAME, APP_VERSION, FRONTEND_DIR, UPLOAD_DIR
 from .database import db_manager
 from .auth_service import auth_service
 from .schemas import (
@@ -24,7 +27,9 @@ from .schemas import (
     AnnouncementUpdate,
     ResetPasswordRequest,
     BookReviewCreate,
-    BookReviewUpdate
+    BookReviewUpdate,
+    RenewRequest,
+    ReservationCreate
 )
 from .security import create_token, verify_password, verify_token
 from .services import (
@@ -52,6 +57,10 @@ def startup() -> None:
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
+# 挂载uploads文件夹
+if UPLOAD_DIR.exists():
+    app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+
 
 @app.get("/", include_in_schema=False)
 def index():
@@ -77,6 +86,11 @@ def get_current_user(authorization: str = Header(default="")) -> Dict[str, Any]:
 def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     if current_user["role"] != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限。")
+    return current_user
+
+def require_staff(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    if current_user["role"] not in ["admin", "librarian"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要馆员或管理员权限。")
     return current_user
 
 
@@ -124,7 +138,7 @@ def list_books(
 
 
 @app.post("/api/books")
-def create_book(data: BookCreate, current_user: Dict[str, Any] = Depends(require_admin)):
+def create_book(data: BookCreate, current_user: Dict[str, Any] = Depends(require_staff)):
     result = book_service.create_book(data)
     audit_log_service.log_action(
         user_id=current_user["id"],
@@ -137,7 +151,7 @@ def create_book(data: BookCreate, current_user: Dict[str, Any] = Depends(require
 
 
 @app.put("/api/books/{book_id}")
-def update_book(book_id: int, data: BookUpdate, current_user: Dict[str, Any] = Depends(require_admin)):
+def update_book(book_id: int, data: BookUpdate, current_user: Dict[str, Any] = Depends(require_staff)):
     result = book_service.update_book(book_id, data)
     audit_log_service.log_action(
         user_id=current_user["id"],
@@ -150,7 +164,7 @@ def update_book(book_id: int, data: BookUpdate, current_user: Dict[str, Any] = D
 
 
 @app.delete("/api/books/{book_id}")
-def delete_book(book_id: int, current_user: Dict[str, Any] = Depends(require_admin)):
+def delete_book(book_id: int, current_user: Dict[str, Any] = Depends(require_staff)):
     result = book_service.delete_book(book_id)
     audit_log_service.log_action(
         user_id=current_user["id"],
@@ -162,18 +176,117 @@ def delete_book(book_id: int, current_user: Dict[str, Any] = Depends(require_adm
     return result
 
 
+@app.post("/api/books/{book_id}/cover")
+async def upload_book_cover(book_id: int, file: UploadFile = File(...), current_user: Dict[str, Any] = Depends(require_staff)):
+    # 检查文件类型
+    allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="只允许上传 JPG、PNG、GIF、WebP 格式的图片")
+    
+    # 检查文件大小（最大2MB）
+    file_size = 0
+    content = await file.read()
+    file_size = len(content)
+    if file_size > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="文件大小不能超过 2MB")
+    
+    # 生成唯一文件名
+    ext = file.filename.split(".")[-1].lower()
+    filename = f"{uuid.uuid4()}.{ext}"
+    file_path = UPLOAD_DIR / filename
+    
+    # 保存文件
+    with open(file_path, "wb") as f:
+        f.write(content)
+    
+    # 更新数据库
+    db_manager.execute("UPDATE books SET cover_image = ?, updated_at = datetime('now', 'localtime') WHERE id = ?", (filename, book_id))
+    
+    audit_log_service.log_action(
+        user_id=current_user["id"],
+        action="UPLOAD_COVER",
+        target_type="book",
+        target_id=book_id,
+        details=f"上传封面: {filename}"
+    )
+    
+    return {"message": "封面上传成功", "cover_image": filename}
+
+
+@app.post("/api/books/import")
+async def import_books(file: UploadFile = File(...), current_user: Dict[str, Any] = Depends(require_staff)):
+    if not file.filename.endswith(".csv"):
+        raise HTTPException(status_code=400, detail="只支持 CSV 文件导入")
+    
+    content = await file.read()
+    csv_content = content.decode("utf-8-sig")
+    
+    reader = csv.DictReader(io.StringIO(csv_content))
+    required_fields = ["isbn", "title", "author", "publisher", "category", "total_count"]
+    
+    # 检查CSV格式
+    if not all(field in reader.fieldnames for field in required_fields):
+        raise HTTPException(status_code=400, detail=f"CSV 文件缺少必要字段，需要: {', '.join(required_fields)}")
+    
+    success_count = 0
+    fail_count = 0
+    errors = []
+    
+    with db_manager.transaction() as conn:
+        for row_num, row in enumerate(reader, start=2):
+            try:
+                isbn = row["isbn"].strip()
+                title = row["title"].strip()
+                author = row["author"].strip()
+                publisher = row.get("publisher", "").strip()
+                category = row["category"].strip()
+                total_count = int(row["total_count"].strip())
+                available_count = int(row.get("available_count", total_count))
+                shelf_location = row.get("shelf_location", "").strip()
+                description = row.get("description", "").strip()
+                
+                if not isbn or not title or not author or not category:
+                    raise ValueError("ISBN、书名、作者、分类不能为空")
+                
+                conn.execute(
+                    """
+                    INSERT INTO books(isbn, title, author, publisher, category, total_count, available_count, shelf_location, description)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (isbn, title, author, publisher, category, total_count, available_count, shelf_location, description)
+                )
+                success_count += 1
+            except Exception as e:
+                fail_count += 1
+                errors.append(f"第 {row_num} 行: {str(e)}")
+    
+    audit_log_service.log_action(
+        user_id=current_user["id"],
+        action="IMPORT_BOOKS",
+        target_type="book",
+        target_id=0,
+        details=f"批量导入图书: 成功 {success_count} 条, 失败 {fail_count} 条"
+    )
+    
+    return {
+        "success": success_count,
+        "failed": fail_count,
+        "errors": errors[:10]  # 最多返回10条错误
+    }
+
+
 @app.get("/api/readers")
 def list_readers(
     search: str = "",
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
-    _: Dict[str, Any] = Depends(require_admin),
+    _: Dict[str, Any] = Depends(require_staff),
 ):
     return reader_service.list_readers(search=search, page=page, page_size=page_size)
 
 
 @app.post("/api/readers")
-def create_reader(data: ReaderCreate, current_user: Dict[str, Any] = Depends(require_admin)):
+def create_reader(data: ReaderCreate, current_user: Dict[str, Any] = Depends(require_staff)):
     result = reader_service.create_reader(data)
     audit_log_service.log_action(
         user_id=current_user["id"],
@@ -186,7 +299,7 @@ def create_reader(data: ReaderCreate, current_user: Dict[str, Any] = Depends(req
 
 
 @app.put("/api/readers/{reader_id}")
-def update_reader(reader_id: int, data: ReaderUpdate, current_user: Dict[str, Any] = Depends(require_admin)):
+def update_reader(reader_id: int, data: ReaderUpdate, current_user: Dict[str, Any] = Depends(require_staff)):
     result = reader_service.update_reader(reader_id, data)
     audit_log_service.log_action(
         user_id=current_user["id"],
@@ -199,7 +312,7 @@ def update_reader(reader_id: int, data: ReaderUpdate, current_user: Dict[str, An
 
 
 @app.delete("/api/readers/{reader_id}")
-def delete_reader(reader_id: int, current_user: Dict[str, Any] = Depends(require_admin)):
+def delete_reader(reader_id: int, current_user: Dict[str, Any] = Depends(require_staff)):
     result = reader_service.delete_reader(reader_id)
     audit_log_service.log_action(
         user_id=current_user["id"],
@@ -221,6 +334,12 @@ def list_records(
 ):
     return borrow_service.list_records(current_user=current_user, status_filter=status_filter, keyword=keyword, page=page, page_size=page_size)
 
+@app.get("/api/books/{book_id}/borrow-count")
+def get_book_borrow_count(book_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取某本书的借阅次数"""
+    count = borrow_service.get_book_borrow_count(book_id)
+    return {"count": count}
+
 
 @app.post("/api/borrow-records")
 def borrow_book(data: BorrowCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
@@ -235,6 +354,12 @@ def borrow_book(data: BorrowCreate, current_user: Dict[str, Any] = Depends(get_c
     return result
 
 
+@app.get("/api/borrow-records/{record_id}")
+def get_borrow_record(record_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取单条借阅记录详情"""
+    return borrow_service.get_record(record_id, current_user)
+
+
 @app.patch("/api/borrow-records/{record_id}/return")
 def return_book(record_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
     result = borrow_service.return_book(record_id, current_user)
@@ -245,17 +370,102 @@ def return_book(record_id: int, current_user: Dict[str, Any] = Depends(get_curre
         target_id=record_id,
         details=f"归还图书"
     )
+    
+    # 处理预约通知
+    borrow_service.process_reservations(result["book_id"])
+    
+    return result
+
+
+@app.post("/api/borrow-records/{record_id}/pay-fine")
+def pay_fine(record_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    return borrow_service.pay_fine(record_id, current_user)
+
+
+@app.patch("/api/borrow-records/{record_id}/renew")
+def renew_book(record_id: int, data: RenewRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
+    result = borrow_service.renew_book(record_id, data.days, current_user)
+    audit_log_service.log_action(
+        user_id=current_user["id"],
+        action="RENEW",
+        target_type="borrow_record",
+        target_id=record_id,
+        details=f"续借{data.days}天"
+    )
+    return result
+
+
+@app.post("/api/reservations")
+def create_reservation(data: ReservationCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
+    result = borrow_service.create_reservation(data.book_id, data.reader_id, current_user)
+    audit_log_service.log_action(
+        user_id=current_user["id"],
+        action="RESERVE",
+        target_type="book",
+        target_id=data.book_id,
+        details=f"预约图书"
+    )
+    return result
+
+
+@app.get("/api/reservations")
+def list_reservations(
+    status_filter: str = Query(default="", alias="status"),
+    keyword: str = "",
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    return borrow_service.list_reservations(current_user=current_user, status_filter=status_filter, keyword=keyword, page=page, page_size=page_size)
+
+
+@app.delete("/api/reservations/{reservation_id}")
+def cancel_reservation(reservation_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    result = borrow_service.cancel_reservation(reservation_id, current_user)
+    audit_log_service.log_action(
+        user_id=current_user["id"],
+        action="CANCEL_RESERVATION",
+        target_type="reservation",
+        target_id=reservation_id,
+        details="取消预约"
+    )
     return result
 
 
 @app.get("/api/overdue")
-def overdue(current_user: Dict[str, Any] = Depends(get_current_user)):
-    return {"items": borrow_service.overdue_records(current_user)}
+def overdue(
+    sort: str = Query(default="due_date_asc"),
+    keyword: str = "",
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    return borrow_service.overdue_records_paginated(
+        current_user=current_user, sort=sort, keyword=keyword, page=page, page_size=page_size
+    )
 
 
 @app.post("/api/reminders/generate")
 def generate_reminders(current_user: Dict[str, Any] = Depends(get_current_user)):
     return borrow_service.generate_reminders(current_user)
+
+
+@app.post("/api/borrow-records/{record_id}/notify")
+def send_reminder(record_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    return borrow_service.send_reminder(record_id, current_user)
+
+
+@app.post("/api/reminders/batch-notify")
+def batch_notify(data: Dict[str, list], current_user: Dict[str, Any] = Depends(get_current_user)):
+    record_ids = data.get("record_ids", [])
+    success_count = 0
+    for record_id in record_ids:
+        try:
+            borrow_service.send_reminder(record_id, current_user)
+            success_count += 1
+        except Exception:
+            continue
+    return {"message": f"批量通知完成，成功发送 {success_count}/{len(record_ids)} 条通知"}
 
 
 @app.get("/api/stats/overview")
@@ -305,7 +515,7 @@ def list_announcements(
 
 
 @app.post("/api/announcements")
-def create_announcement(data: AnnouncementCreate, current_user: Dict[str, Any] = Depends(require_admin)):
+def create_announcement(data: AnnouncementCreate, current_user: Dict[str, Any] = Depends(require_staff)):
     result = announcement_service.create_announcement(data, current_user["id"])
     audit_log_service.log_action(
         user_id=current_user["id"],
@@ -318,7 +528,7 @@ def create_announcement(data: AnnouncementCreate, current_user: Dict[str, Any] =
 
 
 @app.put("/api/announcements/{announcement_id}")
-def update_announcement(announcement_id: int, data: AnnouncementUpdate, current_user: Dict[str, Any] = Depends(require_admin)):
+def update_announcement(announcement_id: int, data: AnnouncementUpdate, current_user: Dict[str, Any] = Depends(require_staff)):
     result = announcement_service.update_announcement(announcement_id, data)
     audit_log_service.log_action(
         user_id=current_user["id"],
@@ -331,7 +541,7 @@ def update_announcement(announcement_id: int, data: AnnouncementUpdate, current_
 
 
 @app.delete("/api/announcements/{announcement_id}")
-def delete_announcement(announcement_id: int, current_user: Dict[str, Any] = Depends(require_admin)):
+def delete_announcement(announcement_id: int, current_user: Dict[str, Any] = Depends(require_staff)):
     result = announcement_service.delete_announcement(announcement_id)
     audit_log_service.log_action(
         user_id=current_user["id"],
@@ -402,6 +612,14 @@ def export_audit_logs(
 
 
 # ===== 书籍评论与评分 =====
+@app.get("/api/books/{book_id}")
+def get_book(book_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取单本书详情"""
+    book = book_service.get_book(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="图书不存在")
+    return book
+
 @app.get("/api/books/{book_id}/reviews")
 def get_book_reviews(book_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取书籍评论"""

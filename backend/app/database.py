@@ -50,13 +50,23 @@ class DatabaseManager:
 
     def init_db(self) -> None:
         with self.transaction() as conn:
+            # 添加新字段（如果不存在）
+            try:
+                conn.execute("ALTER TABLE books ADD COLUMN cover_image TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'reader'")
+            except sqlite3.OperationalError:
+                pass
+            
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
-                    role TEXT NOT NULL CHECK(role IN ('admin', 'reader')),
+                    role TEXT NOT NULL CHECK(role IN ('admin', 'reader', 'librarian')),
                     full_name TEXT NOT NULL,
                     phone TEXT DEFAULT '',
                     email TEXT DEFAULT '',
@@ -76,6 +86,7 @@ class DatabaseManager:
                     available_count INTEGER NOT NULL CHECK(available_count >= 0),
                     shelf_location TEXT DEFAULT '',
                     description TEXT DEFAULT '',
+                    cover_image TEXT DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
                 );
@@ -170,6 +181,7 @@ class DatabaseManager:
                     r.book_id,
                     b.title AS book_title,
                     b.isbn,
+                    b.price,
                     r.reader_id,
                     u.full_name AS reader_name,
                     u.username AS reader_username,
@@ -178,7 +190,10 @@ class DatabaseManager:
                     r.return_date,
                     r.status,
                     r.remark,
-                    CAST(julianday('now') - julianday(r.due_date) AS INTEGER) AS overdue_days
+                    r.fine_amount,
+                    r.fine_paid,
+                    CAST(julianday('now') - julianday(r.due_date) AS INTEGER) AS overdue_days,
+                    CAST((julianday('now') - julianday(r.borrow_date)) AS INTEGER) AS borrow_duration_days
                 FROM borrow_records r
                 JOIN books b ON r.book_id = b.id
                 JOIN users u ON r.reader_id = u.id;
