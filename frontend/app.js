@@ -1,4 +1,5 @@
 console.log('app.js loaded');
+const API_BASE_URL = 'http://localhost:8000'; // 后端 API 基础地址
 const state = {
   token: localStorage.getItem('library_token') || '',
   user: null,
@@ -22,9 +23,10 @@ function toast(message, type = 'info') {
 }
 
 async function api(path, options = {}) {
+  const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(url, { ...options, headers });
   const contentType = response.headers.get('content-type') || '';
   if (!response.ok) {
     let detail = '请求失败';
@@ -39,8 +41,10 @@ async function api(path, options = {}) {
 function showApp() {
   $('loginPage').classList.add('hidden');
   $('appShell').classList.remove('hidden');
-  $('currentUser').textContent = `${state.user.full_name}（${state.user.role === 'admin' ? '管理员' : '读者'}）`;
+  const roleNames = { admin: '管理员', librarian: '馆员', reader: '读者' };
+  $('currentUser').textContent = `${state.user.full_name}（${roleNames[state.user.role] || state.user.role}）`;
   document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', state.user.role !== 'admin'));
+  document.querySelectorAll('.staff-only').forEach(el => el.classList.toggle('hidden', state.user.role === 'reader'));
   switchView('dashboard');
 }
 
@@ -76,6 +80,11 @@ function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>'"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[s]));
 }
 
+// 全局变量
+let overduePage = 1;
+let currentOverdueSort = 'due_date_asc';
+let overdueKeyword = '';
+
 function switchView(viewName) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active-view'));
   document.querySelectorAll('.nav').forEach(n => n.classList.toggle('active', n.dataset.view === viewName));
@@ -85,6 +94,7 @@ function switchView(viewName) {
     books: ['图书管理', '完成图书新增、删除、查询和修改。'],
     readers: ['读者管理', '维护读者基础信息与账号状态。'],
     records: ['借还记录', '记录每一次借书与还书操作。'],
+    reservations: ['预约管理', '管理图书预约记录，支持预约和取消预约。'],
     reports: ['读书报告', '为读者生成个性化报告并在线预览。'],
     overdue: ['逾期提醒', '发现逾期借阅并生成提醒消息。'],
     announcements: ['公告通知', '发布和查看系统公告通知。'],
@@ -96,6 +106,7 @@ function switchView(viewName) {
   if (viewName === 'books') loadBooks();
   if (viewName === 'readers') loadReaders();
   if (viewName === 'records') { loadBorrowOptions(); loadRecords(); }
+  if (viewName === 'reservations') loadReservations();
   if (viewName === 'reports') { loadReportView(); loadRecommendations(); }
   if (viewName === 'overdue') loadOverdue();
   if (viewName === 'announcements') loadAnnouncements();
@@ -117,7 +128,17 @@ async function loadDashboard() {
   drawPie('categoryChart', category.items);
   drawBar('trendChart', trend.items);
   $('topBooks').innerHTML = topBooks.items.length ? topBooks.items.map((item, idx) => `
-    <div class="top-item"><div class="rank">${idx + 1}</div><div><strong>${escapeHtml(item.title)}</strong><br><small>${escapeHtml(item.category)}</small></div><b>${item.borrow_count} 次</b></div>
+    <div class="top-item" onclick="showBookDetail(${item.id})" style="cursor: pointer;">
+      <div class="rank">${idx + 1}</div>
+      <div class="top-book-cover">
+        <img src="${item.cover_image ? `/uploads/${item.cover_image}` : '/static/placeholder-cover.png'}" alt="${escapeHtml(item.title)}" />
+      </div>
+      <div class="top-book-info">
+        <strong>${escapeHtml(item.title)}</strong>
+        <small>${escapeHtml(item.author)}</small>
+      </div>
+      <b>${item.borrow_count} 次</b>
+    </div>
   `).join('') : '<p>暂无借阅数据</p>';
 }
 
@@ -273,21 +294,189 @@ async function loadBooks() {
   $('bookPageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
   $('categoryFilter').innerHTML = '<option value="">全部分类</option>' + data.categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
   $('categoryFilter').value = decodeURIComponent(category);
-  $('bookTable').innerHTML = `
-    <thead><tr><th>ID</th><th>ISBN</th><th>书名</th><th>作者</th><th>分类</th><th>库存</th><th>位置</th><th>操作</th></tr></thead>
-    <tbody>${data.items.map(book => `
-      <tr>
-        <td>${book.id}</td><td>${escapeHtml(book.isbn)}</td><td>${escapeHtml(book.title)}</td><td>${escapeHtml(book.author)}</td><td>${escapeHtml(book.category)}</td>
-        <td>${book.available_count}/${book.total_count}</td><td>${escapeHtml(book.shelf_location)}</td>
-        <td><div class="row-actions">
-          <button class="ghost" onclick="quickBorrow(${book.id})">借阅</button>
-          ${state.user.role === 'admin' ? `<button class="ghost" onclick="editBook(${book.id})">编辑</button><button class="danger" onclick="deleteBook(${book.id})">删除</button>` : ''}
-        </div></td>
-      </tr>`).join('')}</tbody>`;
+  
+  // 卡片式展示
+  $('bookGrid').innerHTML = data.items.map(book => `
+    <div class="book-card" onclick="showBookDetail(${book.id})" style="cursor: pointer;">
+      <div class="book-cover">
+        <img src="${book.cover_image ? `/uploads/${book.cover_image}` : '/static/placeholder-cover.png'}" alt="${escapeHtml(book.title)}" />
+        ${state.user.role === 'admin' || state.user.role === 'librarian' ? `<label class="cover-upload-btn" onclick="event.stopPropagation()"><input type="file" accept="image/*" onchange="uploadCover(${book.id}, this)" /><span>上传封面</span></label>` : ''}
+      </div>
+      <div class="book-info">
+        <h3>${escapeHtml(book.title)}</h3>
+        <p class="author">${escapeHtml(book.author)}</p>
+        <p class="meta">ISBN: ${escapeHtml(book.isbn)}</p>
+        <p class="meta">${escapeHtml(book.publisher)}</p>
+        <p class="meta">分类: ${escapeHtml(book.category)}</p>
+        <div class="book-stats">
+          <span class="stat">库存: ${book.available_count}/${book.total_count}</span>
+        </div>
+        <div class="book-actions" onclick="event.stopPropagation()">
+          <button class="primary small" onclick="quickBorrow(${book.id})">借阅</button>
+          ${state.user.role === 'admin' || state.user.role === 'librarian' ? `<button class="ghost small" onclick="editBook(${book.id})">编辑</button><button class="danger small" onclick="deleteBook(${book.id})">删除</button>` : ''}
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function uploadCover(bookId, input) {
+  const file = input.files[0];
+  if (!file) return;
+  
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  try {
+    const result = await fetch(`/api/books/${bookId}/cover`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${state.token}` },
+      body: formData
+    });
+    const data = await result.json();
+    if (result.ok) {
+      toast('封面上传成功', 'success');
+      loadBooks();
+    } else {
+      toast(data.detail || '上传失败', 'error');
+    }
+  } catch (e) {
+    toast('上传失败: ' + e.message, 'error');
+  } finally {
+    input.value = '';
+  }
+}
+
+async function importBooks() {
+  const file = $('importBooksFile').files[0];
+  if (!file) return;
+  
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  try {
+    const result = await fetch('/api/books/import', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${state.token}` },
+      body: formData
+    });
+    const data = await result.json();
+    if (result.ok) {
+      const resultEl = $('importBooksResult');
+      resultEl.innerHTML = `<div class="success">成功导入 ${data.success} 条记录，失败 ${data.failed} 条</div>`;
+      if (data.errors && data.errors.length > 0) {
+        resultEl.innerHTML += `<div class="errors">错误详情: ${data.errors.join('; ')}</div>`;
+      }
+      resultEl.classList.remove('hidden');
+      loadBooks();
+    } else {
+      toast(data.detail || '导入失败', 'error');
+    }
+  } catch (e) {
+    toast('导入失败: ' + e.message, 'error');
+  }
+  $('importBooksFile').value = '';
 }
 
 function resetBookForm() {
   $('bookForm').reset(); $('bookId').value = ''; $('bookFormTitle').textContent = '新增图书';
+}
+
+async function showBookDetail(bookId) {
+  try {
+    const book = await api(`/api/books/${bookId}`);
+    $('detailTitle').textContent = book.title;
+    $('detailAuthor').textContent = book.author;
+    $('detailIsbn').textContent = book.isbn;
+    $('detailPublisher').textContent = book.publisher || '未知';
+    $('detailCategory').textContent = book.category;
+    $('detailShelf').textContent = book.shelf_location || '未知';
+    $('detailStock').textContent = `${book.available_count}/${book.total_count}`;
+    $('detailDescription').textContent = book.description || '暂无简介';
+    $('detailCover').src = book.cover_image ? `/uploads/${book.cover_image}` : '/static/placeholder-cover.png';
+    
+    // 获取借阅次数
+    const borrowData = await api(`/api/books/${bookId}/borrow-count`);
+    $('detailBorrowCount').textContent = borrowData.count;
+    
+    // 显示/隐藏封面上传按钮
+    if (state.user.role === 'admin' || state.user.role === 'librarian') {
+      $('detailCoverUpload').classList.remove('hidden');
+    } else {
+      $('detailCoverUpload').classList.add('hidden');
+    }
+    
+    // 根据库存显示借阅或预约按钮
+    if (book.available_count > 0) {
+      $('detailBorrowBtn').classList.remove('hidden');
+      $('detailReserveBtn').classList.add('hidden');
+    } else {
+      $('detailBorrowBtn').classList.add('hidden');
+      $('detailReserveBtn').classList.remove('hidden');
+    }
+    
+    // 保存当前书籍ID用于借阅/预约
+    state.currentDetailBookId = bookId;
+    
+    $('bookDetailModal').classList.remove('hidden');
+  } catch (e) {
+    toast('加载图书详情失败: ' + e.message, 'error');
+  }
+}
+
+function closeBookDetailModal() {
+  $('bookDetailModal').classList.add('hidden');
+  state.currentDetailBookId = null;
+}
+
+async function uploadDetailCover(input) {
+  const file = input.files[0];
+  if (!file || !state.currentDetailBookId) return;
+  
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  try {
+    const result = await fetch(`/api/books/${state.currentDetailBookId}/cover`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${state.token}` },
+      body: formData
+    });
+    const data = await result.json();
+    if (result.ok) {
+      toast('封面上传成功', 'success');
+      $('detailCover').src = `/uploads/${data.cover_image}?t=${Date.now()}`;
+      loadBooks(); // 刷新图书列表
+      loadDashboard(); // 刷新热门书籍
+    } else {
+      toast(data.detail || '上传失败', 'error');
+    }
+  } catch (e) {
+    toast('上传失败: ' + e.message, 'error');
+  }
+  input.value = '';
+}
+
+function quickBorrowFromDetail() {
+  if (!state.currentDetailBookId) return;
+  closeBookDetailModal();
+  switchView('records');
+  setTimeout(() => { 
+    $('borrowBook').value = state.currentDetailBookId; 
+    toast('已选择图书，请确认借阅信息'); 
+  }, 100);
+}
+
+async function reserveBookFromDetail() {
+  if (!state.currentDetailBookId) return;
+  if (!confirm('确认预约这本图书？当图书归还时，您将收到通知。')) return;
+  try {
+    await api('/api/reservations', { method: 'POST', body: JSON.stringify({ book_id: state.currentDetailBookId }) });
+    toast('预约成功！当图书归还时您将收到通知', 'success');
+    closeBookDetailModal();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
 function editBook(id) {
@@ -450,8 +639,44 @@ async function loadRecords() {
   const keyword = encodeURIComponent($('recordKeyword').value || '');
   const data = await api(`/api/borrow-records?status=${status}&keyword=${keyword}&page=${state.recordPage}&page_size=8`);
   $('recordPageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
-  $('recordTable').innerHTML = `<thead><tr><th>ID</th><th>图书</th><th>读者</th><th>借出日期</th><th>应还日期</th><th>归还日期</th><th>状态</th><th>操作</th></tr></thead><tbody>
-    ${data.items.map(r => `<tr><td>${r.id}</td><td>${escapeHtml(r.book_title)}</td><td>${escapeHtml(r.reader_name)}</td><td>${r.borrow_date}</td><td>${r.due_date}</td><td>${r.return_date || '-'}</td><td>${statusBadge(r.status)}</td><td>${r.status !== 'returned' ? `<button class="primary" onclick="returnBook(${r.id})">归还</button>` : '-'}</td></tr>`).join('')}
+  
+  // 生成操作按钮
+  const getActionButtons = (r) => {
+    if (r.status === 'returned') {
+      // 显示罚金信息和缴纳按钮
+      if (r.fine_amount && r.fine_amount > 0) {
+        if (r.fine_paid) {
+          return `<span class="badge success">已缴纳 ${r.fine_amount}元</span>`;
+        } else {
+          return `<span class="badge error">罚金 ${r.fine_amount}元</span><button class="primary small" onclick="payFine(${r.id})">缴纳</button>`;
+        }
+      }
+      return '-';
+    }
+    const overdueDays = Math.max(0, Math.round(r.overdue_days || 0));
+    const actions = [];
+    if (currentUserCanReturn(r)) {
+      actions.push(`<button class="primary small" onclick="returnBook(${r.id})">归还</button>`);
+    }
+    if (currentUserCanRenew(r)) {
+      actions.push(`<button class="ghost small" onclick="renewBook(${r.id})">续借</button>`);
+    }
+    if (overdueDays > 0) {
+      actions.push(`<span class="badge error">逾期${overdueDays}天</span>`);
+    }
+    return actions.join('');
+  };
+  
+  const currentUserCanReturn = (r) => {
+    return state.user.role !== 'reader' || r.reader_id === state.user.id;
+  };
+  
+  const currentUserCanRenew = (r) => {
+    return state.user.role !== 'reader' || r.reader_id === state.user.id;
+  };
+  
+  $('recordTable').innerHTML = `<thead><tr><th>ID</th><th>图书</th><th>读者</th><th>借出日期</th><th>应还日期</th><th>归还日期</th><th>逾期天数</th><th>状态</th><th>操作</th></tr></thead><tbody>
+    ${data.items.map(r => `<tr><td>${r.id}</td><td>${escapeHtml(r.book_title)}</td><td>${escapeHtml(r.reader_name)}</td><td>${r.borrow_date}</td><td>${r.due_date}</td><td>${r.return_date || '-'}</td><td>${Math.max(0, Math.round(r.overdue_days || 0))}</td><td>${statusBadge(r.status)}</td><td>${getActionButtons(r)}</td></tr>`).join('')}
   </tbody>`;
 }
 
@@ -461,11 +686,53 @@ async function returnBook(recordId) {
   catch (e) { toast(e.message, 'error'); }
 }
 
-async function loadOverdue() {
-  const data = await api('/api/overdue');
-  $('overdueTable').innerHTML = `<thead><tr><th>记录ID</th><th>图书</th><th>读者</th><th>应还日期</th><th>逾期天数</th><th>状态</th></tr></thead><tbody>
-    ${data.items.map(r => `<tr><td>${r.id}</td><td>${escapeHtml(r.book_title)}</td><td>${escapeHtml(r.reader_name)}</td><td>${r.due_date}</td><td>${Math.max(r.overdue_days, 1)}</td><td>${statusBadge(r.status)}</td></tr>`).join('') || '<tr><td colspan="6">暂无逾期记录</td></tr>'}
+async function renewBook(recordId) {
+  const days = prompt('请输入续借天数（1-90天）：', '15');
+  if (!days || isNaN(days) || parseInt(days) < 1 || parseInt(days) > 90) {
+    toast('请输入有效的续借天数', 'error');
+    return;
+  }
+  try { 
+    await api(`/api/borrow-records/${recordId}/renew`, { method: 'PATCH', body: JSON.stringify({ days: parseInt(days) }) }); 
+    toast(`续借成功，已延长${days}天`, 'success'); 
+    loadRecords(); 
+  }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+async function payFine(recordId) {
+  if (!confirm('确认缴纳罚金？')) return;
+  try { 
+    const result = await api(`/api/borrow-records/${recordId}/pay-fine`, { method: 'POST' }); 
+    toast(result.message, 'success'); 
+    loadRecords(); 
+  }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+state.reservationPage = 1;
+
+async function loadReservations() {
+  const status = encodeURIComponent($('reservationStatus').value || '');
+  const keyword = encodeURIComponent($('reservationKeyword').value || '');
+  const data = await api(`/api/reservations?status=${status}&keyword=${keyword}&page=${state.reservationPage}&page_size=8`);
+  $('reservationPageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
+  
+  const statusMap = { pending: '待处理', notified: '已通知', cancelled: '已取消' };
+  
+  $('reservationTable').innerHTML = `<thead><tr><th>ID</th><th>图书</th><th>读者</th><th>预约日期</th><th>状态</th><th>操作</th></tr></thead><tbody>
+    ${data.items.map(r => `<tr><td>${r.id}</td><td>${escapeHtml(r.book_title)}</td><td>${escapeHtml(r.reader_name)}</td><td>${r.reserve_date}</td><td>${statusMap[r.status] || r.status}</td><td>${r.status === 'pending' ? `<button class="danger small" onclick="cancelReservation(${r.id})">取消预约</button>` : '-'}</td></tr>`).join('') || '<tr><td colspan="6">暂无预约记录</td></tr>'}
   </tbody>`;
+}
+
+async function cancelReservation(reservationId) {
+  if (!confirm('确认取消这个预约？')) return;
+  try { 
+    await api(`/api/reservations/${reservationId}`, { method: 'DELETE' }); 
+    toast('预约已取消', 'success'); 
+    loadReservations(); 
+  }
+  catch (e) { toast(e.message, 'error'); }
 }
 
 async function loadReportView() {
@@ -473,6 +740,145 @@ async function loadReportView() {
   $('reportPreview').innerHTML = '<p>请点击"生成报告"查看当前读者的阅读汇总。</p>';
   if (state.user.role === 'admin') {
     await loadReportReaders();
+  }
+}
+
+// 逾期相关函数
+async function loadOverdue() {
+  const sort = encodeURIComponent(currentOverdueSort || '');
+  const keyword = encodeURIComponent(overdueKeyword || '');
+  const data = await api(`/api/overdue?sort=${sort}&keyword=${keyword}&page=${overduePage}&page_size=8`);
+  
+  $('overduePageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
+  
+  // 更新统计信息
+  const items = data.items || [];
+  const total = data.total || 0;
+  const within7Days = items.filter(r => r.overdue_days > 0 && r.overdue_days <= 7).length;
+  const over14Days = items.filter(r => r.overdue_days > 14).length;
+  const totalFine = items.reduce((sum, r) => sum + (r.fine_amount || 0), 0);
+  
+  $('overdueTotal').textContent = total;
+  $('overdue7Days').textContent = within7Days;
+  $('overdue14Days').textContent = over14Days;
+  $('overdueTotalFine').textContent = `¥${totalFine.toFixed(2)}`;
+  
+  $('overdueTable').innerHTML = `
+    <thead>
+      <tr>
+        <th><input type="checkbox" id="selectAllOverdue" onclick="toggleSelectAllOverdue()" /></th>
+        <th>记录ID</th>
+        <th>图书</th>
+        <th>读者</th>
+        <th>借出日期</th>
+        <th>应还日期</th>
+        <th>逾期天数</th>
+        <th>预估罚金</th>
+        <th>状态</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${items.map(r => `
+        <tr>
+          <td><input type="checkbox" class="overdue-checkbox" value="${r.id}" /></td>
+          <td>${r.id}</td>
+          <td>${escapeHtml(r.book_title)}</td>
+          <td>${escapeHtml(r.reader_name)}</td>
+          <td>${r.borrow_date}</td>
+          <td>${r.due_date}</td>
+          <td class="${r.overdue_days > 14 ? 'text-danger' : r.overdue_days > 7 ? 'text-warning' : ''}">${Math.round(r.overdue_days)}</td>
+          <td>${r.fine_amount ? `<span class="text-danger">¥${r.fine_amount.toFixed(2)}</span>` : '-'}</td>
+          <td>${statusBadge(r.status)}</td>
+          <td>
+            <button class="btn small primary" onclick="notifyReminder(${r.id})">发送通知</button>
+            <button class="btn small ghost" onclick="viewOverdueDetail(${r.id})">详情</button>
+          </td>
+        </tr>
+      `).join('') || '<tr><td colspan="10">暂无逾期记录</td></tr>'}
+    </tbody>
+  `;
+  
+  $('reminderMessages').innerHTML = data.messages ? data.messages.map(m => `
+    <div class="reminder-message">
+      <h4>📌 提醒 ${m.id}</h4>
+      <p>${escapeHtml(m.message)}</p>
+      <small>${m.created_at}</small>
+    </div>
+  `).join('') : '<p class="text-muted">暂无提醒消息</p>';
+}
+
+function toggleSelectAllOverdue() {
+  const checkboxes = document.querySelectorAll('.overdue-checkbox');
+  checkboxes.forEach(cb => cb.checked = $('selectAllOverdue').checked);
+}
+
+async function batchNotify() {
+  const checkboxes = document.querySelectorAll('.overdue-checkbox:checked');
+  if (checkboxes.length === 0) {
+    toast('请选择要发送通知的逾期记录', 'warning');
+    return;
+  }
+  
+  if (!confirm(`确认给选中的 ${checkboxes.length} 位读者发送逾期提醒通知？`)) return;
+  
+  try {
+    const ids = Array.from(checkboxes).map(cb => cb.value);
+    await api('/api/reminders/batch-notify', { 
+      method: 'POST', 
+      body: JSON.stringify({ record_ids: ids }) 
+    });
+    toast(`已成功发送 ${checkboxes.length} 条通知！`, 'success');
+    loadOverdue();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function viewOverdueDetail(recordId) {
+  try {
+    const record = await api(`/api/borrow-records/${recordId}`);
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>逾期记录详情</h3>
+          <button onclick="this.parentElement.parentElement.parentElement.remove()">×</button>
+        </div>
+        <div class="modal-body">
+          <table class="detail-table">
+            <tr><td>图书</td><td>${escapeHtml(record.book_title)}</td></tr>
+            <tr><td>ISBN</td><td>${record.isbn}</td></tr>
+            <tr><td>读者</td><td>${escapeHtml(record.reader_name)}</td></tr>
+            <tr><td>借出日期</td><td>${record.borrow_date}</td></tr>
+            <tr><td>应还日期</td><td>${record.due_date}</td></tr>
+            <tr><td>逾期天数</td><td class="text-danger">${Math.round(record.overdue_days)} 天</td></tr>
+            <tr><td>预估罚金</td><td class="text-danger">¥${(record.fine_amount || 0).toFixed(2)}</td></tr>
+            <tr><td>状态</td><td>${statusBadge(record.status)}</td></tr>
+          </table>
+        </div>
+        <div class="modal-footer">
+          <button class="btn ghost" onclick="this.parentElement.parentElement.parentElement.remove()">关闭</button>
+          <button class="btn primary" onclick="notifyReminder(${record.id}); this.parentElement.parentElement.parentElement.remove();">发送通知</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function notifyReminder(recordId) {
+  if (!confirm('确认发送提醒通知给读者？')) return;
+  
+  try {
+    await api(`/api/borrow-records/${recordId}/notify`, { method: 'POST' });
+    toast('通知发送成功！', 'success');
+    loadOverdue();
+  } catch (e) {
+    toast(e.message, 'error');
   }
 }
 
@@ -710,6 +1116,8 @@ $('bookSearchBtn').addEventListener('click', () => { state.bookPage = 1; loadBoo
 $('categoryFilter').addEventListener('change', () => { state.bookPage = 1; loadBooks(); });
 $('bookPrev').addEventListener('click', () => { if (state.bookPage > 1) { state.bookPage--; loadBooks(); } });
 $('bookNext').addEventListener('click', () => { state.bookPage++; loadBooks(); });
+$('importBooksBtn').addEventListener('click', () => $('importBooksFile').click());
+$('importBooksFile').addEventListener('change', importBooks);
 $('resetBookForm').addEventListener('click', resetBookForm);
 $('bookForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -750,6 +1158,10 @@ $('readerForm').addEventListener('submit', async (e) => {
 $('recordSearchBtn').addEventListener('click', () => { state.recordPage = 1; loadRecords(); });
 $('recordPrev').addEventListener('click', () => { if (state.recordPage > 1) { state.recordPage--; loadRecords(); } });
 $('recordNext').addEventListener('click', () => { state.recordPage++; loadRecords(); });
+$('reservationSearchBtn').addEventListener('click', () => { state.reservationPage = 1; loadReservations(); });
+$('reservationStatus').addEventListener('change', () => { state.reservationPage = 1; loadReservations(); });
+$('reservationPrev').addEventListener('click', () => { if (state.reservationPage > 1) { state.reservationPage--; loadReservations(); } });
+$('reservationNext').addEventListener('click', () => { state.reservationPage++; loadReservations(); });
 $('borrowForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const payload = { book_id: Number($('borrowBook').value), borrow_days: Number($('borrowDays').value), remark: $('borrowRemark').value };
@@ -759,14 +1171,39 @@ $('borrowForm').addEventListener('submit', async (e) => {
 });
 $('generateReportBtn').addEventListener('click', loadReport);
 $('downloadReportBtn').addEventListener('click', downloadReport);
-$('refreshOverdueBtn').addEventListener('click', loadOverdue);
+$('refreshOverdueBtn').addEventListener('click', () => { overduePage = 1; loadOverdue(); });
+$('overdueSort').addEventListener('change', (e) => { currentOverdueSort = e.target.value; loadOverdue(); });
+$('overdueKeyword').addEventListener('input', (e) => { overdueKeyword = e.target.value; });
+$('overdueKeyword').addEventListener('keypress', (e) => { if (e.key === 'Enter') { overduePage = 1; loadOverdue(); } });
 $('generateRemindersBtn').addEventListener('click', async () => {
+  if (!confirm('确认要生成提醒消息吗？')) return;
+  
   try {
-    const result = await api('/api/overdue/generate-reminders', { method: 'POST' });
-    $('reminderMessages').innerHTML = result.messages.map(m => `<div class="reminder-msg">${escapeHtml(m)}</div>`).join('');
-    toast('已生成 ' + result.messages.length + ' 条提醒', 'success');
+    await api('/api/reminders/generate', { method: 'POST' });
+    toast('提醒消息生成成功！', 'success');
     loadOverdue();
   } catch (e) { toast(e.message, 'error'); }
+});
+$('batchNotifyBtn').addEventListener('click', batchNotify);
+$('exportOverdueBtn').addEventListener('click', async () => {
+  const sort = encodeURIComponent(currentOverdueSort || '');
+  const keyword = encodeURIComponent(overdueKeyword || '');
+  
+  try {
+    const data = await api(`/api/overdue?sort=${sort}&keyword=${keyword}&page=1&page_size=10000`);
+    const csv = Papa.unparse(data.items);
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'overdue_records.csv';
+    a.click();
+    
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 });
 $('exportBooksBtn').addEventListener('click', async () => {
   try { const csv = await api(`/api/books/export?search=${encodeURIComponent($('bookSearch').value || '')}&category=${encodeURIComponent($('categoryFilter').value || '')}`); downloadCsv('图书列表.csv', csv); }
