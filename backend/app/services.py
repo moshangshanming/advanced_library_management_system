@@ -122,10 +122,10 @@ class BookService:
         try:
             book_id = db_manager.execute(
                 """
-                INSERT INTO books(isbn, title, author, publisher, category, total_count, available_count, shelf_location, description)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO books(isbn, title, author, publisher, category, total_count, available_count, shelf_location, description, price)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (data.isbn.strip(), data.title.strip(), data.author.strip(), data.publisher.strip(), data.category.strip(), data.total_count, available, data.shelf_location.strip(), data.description.strip()),
+                (data.isbn.strip(), data.title.strip(), data.author.strip(), data.publisher.strip(), data.category.strip(), data.total_count, available, data.shelf_location.strip(), data.description.strip(), data.price),
             )
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=400, detail="ISBN 已存在，不能重复添加。")
@@ -740,8 +740,21 @@ class ExportService:
         writer.writerows(rows)
         return output.getvalue()
 
-    def export_books(self) -> str:
-        rows = db_manager.fetch_all("SELECT id, isbn, title, author, publisher, category, total_count, available_count, shelf_location, created_at FROM books ORDER BY id")
+    def export_books(self, search: str = "", category: str = "") -> str:
+        conditions = []
+        params: List[Any] = []
+        if search.strip():
+            conditions.append("(title LIKE ? OR author LIKE ? OR isbn LIKE ? OR publisher LIKE ?)")
+            like = f"%{search.strip()}%"
+            params.extend([like, like, like, like])
+        if category.strip():
+            conditions.append("category = ?")
+            params.append(category.strip())
+        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
+        rows = db_manager.fetch_all(
+            f"SELECT id, isbn, title, author, publisher, category, total_count, available_count, shelf_location, price, created_at FROM books{where_sql} ORDER BY id",
+            tuple(params)
+        )
         return self.to_csv(rows)
 
     def export_records(self, current_user: Dict[str, Any]) -> str:

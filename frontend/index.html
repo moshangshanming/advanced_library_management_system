@@ -36,6 +36,7 @@
       <p>创建您的图书馆账号</p>
       <form id="registerForm" class="form-grid">
         <label>用户名<input id="registerUsername" placeholder="请输入用户名" required /></label>
+        <label>姓名<input id="registerFullName" placeholder="请输入真实姓名" required /></label>
         <label>手机号<input id="registerPhone" placeholder="请输入手机号" required /></label>
         <div class="code-row">
           <label>验证码<input id="registerCode" placeholder="请输入验证码" required /></label>
@@ -104,16 +105,43 @@
 
       <section id="dashboard" class="view active-view">
         <div id="metricGrid" class="metric-grid"></div>
-        <div class="chart-grid">
-          <article class="panel">
-            <div class="panel-title"><h3>馆藏分类分布</h3><span>大数据可视化</span></div>
-            <canvas id="categoryChart" height="220"></canvas>
-          </article>
-          <article class="panel">
-            <div class="panel-title"><h3>近 14 天借阅趋势</h3><span>业务趋势</span></div>
-            <canvas id="trendChart" height="220"></canvas>
-          </article>
-        </div>
+        
+        <!-- 图表和时间筛选器合并到一个面板 -->
+        <article class="panel charts-panel">
+          <div class="chart-grid">
+            <div class="chart-item">
+              <div class="panel-title"><h3>馆藏分类分布</h3><span>大数据可视化</span></div>
+              <div id="categoryChartLoading" class="chart-loading hidden">
+                <div class="skeleton-chart"></div>
+              </div>
+              <canvas id="categoryChart" height="220"></canvas>
+            </div>
+            <div class="chart-item">
+              <div class="panel-title"><h3>借阅趋势</h3><span id="trendPeriodText">近 7 天</span></div>
+              <div id="trendChartLoading" class="chart-loading hidden">
+                <div class="skeleton-chart"></div>
+              </div>
+              <canvas id="trendChart" height="220"></canvas>
+              <div id="trendEmptyMessage" class="empty-message hidden">暂无借阅数据</div>
+            </div>
+          </div>
+          
+          <!-- 时间筛选器 - 放在图表底部 -->
+          <div class="time-filter-section">
+            <div class="time-filter-quick">
+              <button class="time-filter-btn active" data-days="7">近 7 天</button>
+              <button class="time-filter-btn" data-days="30">近 30 天</button>
+              <button class="time-filter-btn" data-days="90">近 90 天</button>
+            </div>
+            <div class="time-filter-custom">
+              <span>自定义：</span>
+              <input type="date" id="customStartDate" />
+              <span>至</span>
+              <input type="date" id="customEndDate" />
+              <button id="applyCustomDate" class="primary">应用</button>
+            </div>
+          </div>
+        </article>
         <article class="panel">
           <div class="panel-title"><h3>热门图书 Top10</h3><span>按借阅次数排序</span></div>
           <div id="topBooks" class="top-list"></div>
@@ -121,52 +149,138 @@
       </section>
 
       <section id="books" class="view">
-        <article class="panel">
-          <div class="panel-title"><h3>图书检索</h3><span>支持标题 / 作者 / ISBN / 出版社模糊查询</span></div>
-          <div class="toolbar">
-            <input id="bookSearch" placeholder="输入关键词搜索图书" />
-            <select id="categoryFilter"><option value="">全部分类</option></select>
-            <button id="bookSearchBtn" class="primary">查询</button>
-            <button id="exportBooksBtn" class="ghost">导出 CSV</button>
-          </div>
-        </article>
-
-        <article class="panel admin-only">
-          <div class="panel-title"><h3 id="bookFormTitle">新增图书</h3><span>输入校验已在前后端同时实现</span></div>
-          <form id="bookForm" class="form-grid grid-4">
-            <input type="hidden" id="bookId" />
-            <label>ISBN<input id="bookIsbn" required /></label>
-            <label>书名<input id="bookTitle" required /></label>
-            <label>作者<input id="bookAuthor" required /></label>
-            <label>出版社<input id="bookPublisher" /></label>
-            <label>分类<input id="bookCategory" required /></label>
-            <label>馆藏总数<input id="bookTotal" type="number" min="0" required /></label>
-            <label>可借数量<input id="bookAvailable" type="number" min="0" /></label>
-            <label>书架位置<input id="bookShelf" /></label>
-            <label class="span-4">简介<input id="bookDescription" /></label>
-            <button class="primary" type="submit">保存图书</button>
-            <button id="resetBookForm" class="ghost" type="button">清空</button>
-          </form>
-        </article>
-
-        <article class="panel">
-          <div class="panel-title"><h3>图书管理</h3><span id="bookTotalText"></span></div>
-          <div class="toolbar">
+        <!-- 合并的图书管理面板 -->
+        <article class="panel books-panel">
+          <!-- 工具栏：搜索 + 操作按钮 -->
+          <div class="toolbar books-toolbar">
             <input id="bookSearch" placeholder="搜索书名、作者、ISBN、出版社" />
             <select id="categoryFilter">
               <option value="">全部分类</option>
             </select>
             <button id="bookSearchBtn" class="primary">搜索</button>
-            <label class="import-label">
-              <input type="file" id="importBooksFile" accept=".csv" hidden />
-              <button id="importBooksBtn" class="primary">批量导入CSV</button>
-            </label>
+            <div class="toolbar-actions">
+              <button id="addBookBtn" class="primary admin-only">+ 新增图书</button>
+              <button id="exportBooksBtn" class="ghost">导出 CSV</button>
+              <label class="import-label admin-only">
+                <input type="file" id="importBooksFile" accept=".csv" hidden />
+                <button id="importBooksBtn" class="ghost">批量导入</button>
+              </label>
+              <span id="bookTotalText" class="toolbar-total"></span>
+            </div>
           </div>
+          
+          <!-- 导入结果提示 -->
           <div id="importBooksResult" class="import-result hidden"></div>
+          
+          <!-- 图书卡片网格 -->
           <div id="bookGrid" class="book-grid"></div>
-          <div class="pager"><button id="bookPrev">上一页</button><span id="bookPageText"></span><button id="bookNext">下一页</button></div>
+          
+          <!-- 分页 -->
+          <div class="pager">
+            <button id="bookPrev">上一页</button>
+            <span id="bookPageText"></span>
+            <button id="bookNext">下一页</button>
+          </div>
         </article>
       </section>
+      
+      <!-- 新增/编辑图书弹窗 -->
+      <div id="bookFormModal" class="modal hidden">
+        <div class="modal-content book-form-modal square-modal">
+          <div class="modal-header sticky-header">
+            <h3 id="bookFormTitle">新增图书</h3>
+            <button class="close-btn" onclick="closeBookFormModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form id="bookForm" class="form-grid">
+              <input type="hidden" id="bookId" />
+              
+              <!-- 基础信息 -->
+              <div class="form-section">
+                <h4>基础信息</h4>
+                <div class="form-row">
+                  <label>ISBN
+                    <input id="bookIsbn" required placeholder="* 请输入10或13位ISBN" />
+                    <span class="validation-error"></span>
+                  </label>
+                  <label>书名
+                    <input id="bookTitle" required placeholder="* 请输入书名" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>作者
+                    <input id="bookAuthor" required placeholder="* 请输入作者" />
+                    <span class="validation-error"></span>
+                  </label>
+                  <label>出版社
+                    <div class="select-wrapper">
+                      <select id="bookPublisher" class="closable-select">
+                        <option value="">请选择或输入</option>
+                      </select>
+                      <button type="button" class="select-clear" onclick="clearSelect('bookPublisher')">&times;</button>
+                    </div>
+                    <input id="bookPublisherCustom" placeholder="或手动输入" style="margin-top: 4px;" />
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>分类
+                    <div class="select-wrapper">
+                      <select id="bookCategory" required class="closable-select">
+                        <option value="">* 请选择分类</option>
+                      </select>
+                      <button type="button" class="select-clear" onclick="clearSelect('bookCategory')">&times;</button>
+                    </div>
+                    <input id="bookCategoryCustom" placeholder="或输入新分类" style="margin-top: 4px;" />
+                  </label>
+                  <label>书架位置
+                    <div class="select-wrapper">
+                      <select id="bookShelf" class="closable-select">
+                        <option value="">请选择书架</option>
+                      </select>
+                      <button type="button" class="select-clear" onclick="clearSelect('bookShelf')">&times;</button>
+                    </div>
+                    <input id="bookShelfCustom" placeholder="或手动输入" style="margin-top: 4px;" />
+                  </label>
+                </div>
+              </div>
+              
+              <!-- 库存信息 -->
+              <div class="form-section">
+                <h4>库存信息</h4>
+                <div class="form-row">
+                  <label>馆藏总数
+                    <input id="bookTotal" type="number" min="1" required placeholder="* 请输入馆藏总数" />
+                    <span class="validation-error"></span>
+                  </label>
+                  <label>可借数量
+                    <input id="bookAvailable" type="number" min="0" placeholder="默认为馆藏总数" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>价格
+                    <input id="bookPrice" type="number" min="0" step="0.01" placeholder="0.00" />
+                  </label>
+                </div>
+              </div>
+              
+              <!-- 补充信息 -->
+              <div class="form-section">
+                <h4>补充信息</h4>
+                <label>简介（最多500字）
+                  <textarea id="bookDescription" maxlength="500" rows="4" placeholder="请输入图书简介..."></textarea>
+                  <span class="char-count">0/500</span>
+                </label>
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button id="resetBookForm" class="ghost" type="button">清空</button>
+            <button class="primary" onclick="submitBookForm()">保存</button>
+          </div>
+        </div>
+      </div>
 
       <section id="readers" class="view">
         <article class="panel">
@@ -289,7 +403,7 @@
             <div class="stat-label">预估总罚金</div>
           </div>
         </div>
-        
+
         <article class="panel">
           <div class="panel-title"><h3>逾期提醒中心</h3><span>自动扫描逾期记录并生成提醒消息</span></div>
           <div class="toolbar">
@@ -382,6 +496,7 @@
             <p><strong>分类:</strong> <span id="detailCategory"></span></p>
             <p><strong>书架位置:</strong> <span id="detailShelf"></span></p>
             <p><strong>库存:</strong> <span id="detailStock"></span></p>
+            <p><strong>价格:</strong> ¥<span id="detailPrice">0.00</span></p>
             <p><strong>借阅次数:</strong> <span id="detailBorrowCount"></span></p>
           </div>
           <div class="detail-description">

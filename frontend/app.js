@@ -8,8 +8,10 @@ const state = {
   announcementPage: 1,
   auditPage: 1,
   lastBooks: [],
+  lastRecords: [], // 借还记录
   lastReaders: [],
   currentReport: null,
+  dashboardTimeRange: 7, // 默认近7天
 };
 
 const $ = (id) => document.getElementById(id);
@@ -114,32 +116,120 @@ function switchView(viewName) {
 }
 
 async function loadDashboard() {
-  const [overview, category, trend, topBooks] = await Promise.all([
-    api('/api/stats/overview'), api('/api/stats/category'), api('/api/stats/borrow-trend?days=14'), api('/api/stats/top-books')
-  ]);
-  const metrics = [
-    ['馆藏图书', overview.book_total ?? '—'],
-    ['读者数量', overview.reader_total ?? '—'],
-    ['借阅中', overview.borrowed],
-    ['已逾期', overview.overdue],
-    ['已归还', overview.returned],
+  // 显示加载状态
+  $('categoryChartLoading').classList.remove('hidden');
+  $('trendChartLoading').classList.remove('hidden');
+  $('trendEmptyMessage').classList.add('hidden');
+  
+  try {
+    const [overview, category, trend, topBooks] = await Promise.all([
+      api('/api/stats/overview'), 
+      api('/api/stats/category'), 
+      api(`/api/stats/borrow-trend?days=${state.dashboardTimeRange}`), 
+      api('/api/stats/top-books')
+    ]);
+    
+    // 渲染数据卡片（带点击跳转和辅助信息）
+    renderMetricCards(overview);
+    
+    // 绘制图表
+    drawPie('categoryChart', category.items);
+    $('categoryChartLoading').classList.add('hidden');
+    
+    // 处理趋势图
+    if (trend.items && trend.items.length > 0) {
+      drawBar('trendChart', trend.items);
+      $('trendEmptyMessage').classList.add('hidden');
+    } else {
+      // 空状态提示
+      const canvas = $('trendChart');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#999';
+      ctx.font = '14px "Source Sans 3", sans-serif';
+      ctx.fillText(`暂无近 ${state.dashboardTimeRange} 天借阅数据`, canvas.width/2-100, canvas.height/2);
+      $('trendEmptyMessage').classList.remove('hidden');
+    }
+    $('trendChartLoading').classList.add('hidden');
+    
+    // 更新趋势图标题
+    $('trendPeriodText').textContent = `近 ${state.dashboardTimeRange} 天`;
+    
+    // 热门图书
+    $('topBooks').innerHTML = topBooks.items.length ? topBooks.items.map((item, idx) => `
+      <div class="top-item" onclick="showBookDetail(${item.id})" style="cursor: pointer;">
+        <div class="rank">${idx + 1}</div>
+        <div class="top-book-cover">
+          <img src="${item.cover_image ? `/uploads/${item.cover_image}` : '/static/placeholder-cover.png'}" alt="${escapeHtml(item.title)}" />
+        </div>
+        <div class="top-book-info">
+          <strong>${escapeHtml(item.title)}</strong>
+          <small>${escapeHtml(item.author)}</small>
+        </div>
+        <b>${item.borrow_count} 次</b>
+      </div>
+    `).join('') : '<p>暂无借阅数据</p>';
+  } catch (error) {
+    console.error('加载仪表盘失败:', error);
+    toast('加载数据失败', 'error');
+    $('categoryChartLoading').classList.add('hidden');
+    $('trendChartLoading').classList.add('hidden');
+  }
+}
+
+// 渲染数据卡片（带点击跳转和辅助信息）
+function renderMetricCards(overview) {
+  const cards = [
+    {
+      label: '馆藏图书',
+      value: overview.book_total ?? '—',
+      subtitle: overview.new_books_this_month ? `本月新增 ${overview.new_books_this_month} 本` : '',
+      view: 'books'
+    },
+    {
+      label: '读者数量',
+      value: overview.reader_total ?? '—',
+      subtitle: overview.new_readers_this_month ? `本月新增 ${overview.new_readers_this_month} 人` : '',
+      view: state.user.role !== 'reader' ? 'readers' : null
+    },
+    {
+      label: '借阅中',
+      value: overview.borrowed,
+      subtitle: overview.overdue ? `逾期 ${overview.overdue} 本` : '',
+      view: 'records'
+    },
+    {
+      label: '已逾期',
+      value: overview.overdue,
+      subtitle: '',
+      isWarning: overview.overdue > 0,
+      view: 'overdue'
+    },
+    {
+      label: '已归还',
+      value: overview.returned,
+      subtitle: '',
+      view: 'records'
+    }
   ];
-  $('metricGrid').innerHTML = metrics.map(([label, value]) => `<div class="metric-card"><span>${label}</span><strong>${value}</strong></div>`).join('');
-  drawPie('categoryChart', category.items);
-  drawBar('trendChart', trend.items);
-  $('topBooks').innerHTML = topBooks.items.length ? topBooks.items.map((item, idx) => `
-    <div class="top-item" onclick="showBookDetail(${item.id})" style="cursor: pointer;">
-      <div class="rank">${idx + 1}</div>
-      <div class="top-book-cover">
-        <img src="${item.cover_image ? `/uploads/${item.cover_image}` : '/static/placeholder-cover.png'}" alt="${escapeHtml(item.title)}" />
-      </div>
-      <div class="top-book-info">
-        <strong>${escapeHtml(item.title)}</strong>
-        <small>${escapeHtml(item.author)}</small>
-      </div>
-      <b>${item.borrow_count} 次</b>
+  
+  $('metricGrid').innerHTML = cards.map((card, index) => `
+    <div class="metric-card ${card.isWarning ? 'overdue-warning' : ''}" data-view="${card.view}" data-index="${index}">
+      <span>${card.label}</span>
+      <strong>${card.value}</strong>
+      ${card.subtitle ? `<span class="metric-subtitle">${card.subtitle}</span>` : ''}
     </div>
-  `).join('') : '<p>暂无借阅数据</p>';
+  `).join('');
+  
+  // 添加点击事件
+  document.querySelectorAll('.metric-card').forEach((card, index) => {
+    card.addEventListener('click', function() {
+      const viewName = this.dataset.view;
+      if (viewName && viewName !== 'null') {
+        switchView(viewName);
+      }
+    });
+  });
 }
 
 // ========== 饼图（糖果色，无 hover 高亮） ==========
@@ -167,7 +257,15 @@ function drawPie(canvasId, items) {
   const candyColors = ['#FF6B6B', '#FFB347', '#FFD966', '#A2E1B0', '#77C3F2', '#D9A5E6', '#F5A3C7', '#BCE5FF', '#C9E4DE', '#FADADD'];
   const colors = sortedItems.map((_, idx) => candyColors[idx % candyColors.length]);
 
-  const cx = 110, cy = height / 2, r = 70;
+  // 根据图例数量动态调整饼图位置
+  const maxLegendWidth = Math.max(...sortedItems.map(item => item.name.length)) * 8 + 60;
+  const hasEnoughSpace = width - (110 + 70 + 15) > maxLegendWidth;
+  
+  // 如果空间不足，缩小饼图并左移
+  const cx = hasEnoughSpace ? 110 : 90;
+  const cy = height / 2;
+  const r = hasEnoughSpace ? 70 : 60;
+  
   let start = -Math.PI / 2;
   for (let i = 0; i < sortedItems.length; i++) {
     const angle = (Number(sortedItems[i].value) / total) * Math.PI * 2;
@@ -193,17 +291,41 @@ function drawPie(canvasId, items) {
   ctx.lineWidth = 1.2;
   ctx.stroke();
 
-  // 右侧图例
+  // 右侧图例 - 优化布局和字体大小
   const legendX = cx + r + 15;
-  const legendStartY = cy - (sortedItems.length * 18) / 2;
-  ctx.font = '11px "Source Sans 3", sans-serif';
+  const availableWidth = width - legendX - 10;
+  
+  // 根据可用宽度调整字体大小
+  const fontSize = availableWidth < 150 ? 10 : 11;
+  const lineHeight = fontSize + 8;
+  const boxSize = fontSize + 2;
+  
+  const legendStartY = cy - (sortedItems.length * lineHeight) / 2;
+  ctx.font = `bold ${fontSize}px "Source Sans 3", sans-serif`;
+  
   for (let i = 0; i < sortedItems.length; i++) {
     const item = sortedItems[i];
-    const y = legendStartY + i * 20;
+    const y = legendStartY + i * lineHeight;
+    
+    // 绘制颜色框
     ctx.fillStyle = colors[i];
-    ctx.fillRect(legendX, y, 12, 12);
-    ctx.fillStyle = '#666666';
-    ctx.fillText(`${item.name}: ${item.value}`, legendX + 18, y + 10);
+    ctx.fillRect(legendX, y, boxSize, boxSize);
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(legendX, y, boxSize, boxSize);
+    
+    // 绘制文字 - 如果太长则截断
+    let labelText = `${item.name}: ${item.value}`;
+    const textWidth = ctx.measureText(labelText).width;
+    if (textWidth > availableWidth - boxSize - 8) {
+      // 截断文字
+      const maxNameLength = Math.floor((availableWidth - boxSize - 30) / 8);
+      const shortName = item.name.length > maxNameLength ? item.name.substring(0, maxNameLength) + '...' : item.name;
+      labelText = `${shortName}: ${item.value}`;
+    }
+    
+    ctx.fillStyle = '#333333';
+    ctx.fillText(labelText, legendX + boxSize + 6, y + fontSize);
   }
 }
 
@@ -226,7 +348,7 @@ function drawBar(canvasId, items) {
     return;
   }
 
-  const pad = { left: 45, right: 20, top: 20, bottom: 30 };
+  const pad = { left: 45, right: 20, top: 20, bottom: 40 };
   const graphW = width - pad.left - pad.right;
   const graphH = height - pad.top - pad.bottom;
   const max = Math.max(1, ...items.map(x => Number(x.count)));
@@ -252,6 +374,10 @@ function drawBar(canvasId, items) {
   ctx.setLineDash([]);
 
   let maxCount = -Infinity, maxIndex = -1;
+  
+  // 计算日期标签的显示间隔，避免过于密集
+  const labelInterval = items.length > 14 ? 3 : items.length > 7 ? 2 : 1;
+  
   for (let i = 0; i < items.length; i++) {
     const count = Number(items[i].count);
     if (count > maxCount) { maxCount = count; maxIndex = i; }
@@ -264,12 +390,19 @@ function drawBar(canvasId, items) {
     ctx.lineWidth = 1;
     ctx.strokeRect(x, y, barW, Math.max(barH, 2));
 
-    // X轴日期
-    ctx.fillStyle = '#666666';
-    ctx.font = '10px "Source Sans 3", sans-serif';
-    let label = items[i].day;
-    if (label.length > 5) label = label.slice(5);
-    ctx.fillText(label, x + barW/2 - 12, height - pad.bottom + 10);
+    // X轴日期 - 根据间隔显示，避免过于密集
+    if (i % labelInterval === 0 || i === items.length - 1) {
+      ctx.save();
+      ctx.translate(x + barW/2, height - pad.bottom + 10);
+      ctx.rotate(-Math.PI / 6); // 旋转30度
+      ctx.fillStyle = '#666666';
+      ctx.font = '9px "Source Sans 3", sans-serif';
+      let label = items[i].day;
+      if (label.length > 5) label = label.slice(5);
+      ctx.textAlign = 'right';
+      ctx.fillText(label, 0, 0);
+      ctx.restore();
+    }
   }
 
   // 最高柱子数值标签
@@ -288,15 +421,18 @@ function drawBar(canvasId, items) {
 async function loadBooks() {
   const search = encodeURIComponent($('bookSearch').value || '');
   const category = encodeURIComponent($('categoryFilter').value || '');
-  const data = await api(`/api/books?search=${search}&category=${category}&page=${state.bookPage}&page_size=8`);
+  const data = await api(`/api/books?search=${search}&category=${category}&page=${state.bookPage}&page_size=9`);
   state.lastBooks = data.items;
   $('bookTotalText').textContent = `共 ${data.total} 本`;
   $('bookPageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
   $('categoryFilter').innerHTML = '<option value="">全部分类</option>' + data.categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
   $('categoryFilter').value = decodeURIComponent(category);
   
+  // 加载下拉选项（分类、出版社、书架）
+  await loadDropdownOptions();
+  
   // 卡片式展示
-  $('bookGrid').innerHTML = data.items.map(book => `
+  $('bookGrid').innerHTML = data.items.length ? data.items.map(book => `
     <div class="book-card" onclick="showBookDetail(${book.id})" style="cursor: pointer;">
       <div class="book-cover">
         <img src="${book.cover_image ? `/uploads/${book.cover_image}` : '/static/placeholder-cover.png'}" alt="${escapeHtml(book.title)}" />
@@ -312,12 +448,63 @@ async function loadBooks() {
           <span class="stat">库存: ${book.available_count}/${book.total_count}</span>
         </div>
         <div class="book-actions" onclick="event.stopPropagation()">
+          <button class="primary small" onclick="showBookDetail(${book.id})">详情</button>
           <button class="primary small" onclick="quickBorrow(${book.id})">借阅</button>
           ${state.user.role === 'admin' || state.user.role === 'librarian' ? `<button class="ghost small" onclick="editBook(${book.id})">编辑</button><button class="danger small" onclick="deleteBook(${book.id})">删除</button>` : ''}
         </div>
       </div>
     </div>
-  `).join('');
+  `).join('') : '<div class="empty-state"><p>未找到匹配图书，请调整关键词或筛选条件</p></div>';
+}
+
+// 加载下拉选择框选项
+async function loadDropdownOptions() {
+  try {
+    // 从后端获取统计数据以获取分类列表
+    const categoryData = await api('/api/stats/category');
+    const categories = categoryData.items.map(item => item.name);
+    
+    // 从图书列表中获取唯一的出版社和书架位置
+    const publishers = [...new Set(state.lastBooks.map(b => b.publisher).filter(p => p))];
+    const shelves = [...new Set(state.lastBooks.map(b => b.shelf_location).filter(s => s))];
+    
+    // 填充分类下拉框
+    const categorySelect = $('bookCategory');
+    if (categorySelect) {
+      const currentValue = categorySelect.value;
+      categorySelect.innerHTML = '<option value="">请选择分类</option>' + 
+        categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+      categorySelect.value = currentValue;
+    }
+    
+    // 填充出版社下拉框
+    const publisherSelect = $('bookPublisher');
+    if (publisherSelect) {
+      const currentValue = publisherSelect.value;
+      publisherSelect.innerHTML = '<option value="">请选择或输入</option>' + 
+        publishers.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+      publisherSelect.value = currentValue;
+    }
+    
+    // 填充书架位置下拉框
+    const shelfSelect = $('bookShelf');
+    if (shelfSelect) {
+      const currentValue = shelfSelect.value;
+      shelfSelect.innerHTML = '<option value="">请选择书架</option>' + 
+        shelves.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+      shelfSelect.value = currentValue;
+    }
+  } catch (e) {
+    console.error('加载下拉选项失败:', e);
+  }
+}
+
+// 清除下拉框选择
+function clearSelect(selectId) {
+  const select = $(selectId);
+  if (select) {
+    select.value = '';
+  }
 }
 
 async function uploadCover(bookId, input) {
@@ -379,7 +566,7 @@ async function importBooks() {
 }
 
 function resetBookForm() {
-  $('bookForm').reset(); $('bookId').value = ''; $('bookFormTitle').textContent = '新增图书';
+  $('bookForm').reset(); $('bookId').value = ''; $('bookFormTitle').textContent = '新增图书'; $('bookPrice').value = '';
 }
 
 async function showBookDetail(bookId) {
@@ -392,6 +579,7 @@ async function showBookDetail(bookId) {
     $('detailCategory').textContent = book.category;
     $('detailShelf').textContent = book.shelf_location || '未知';
     $('detailStock').textContent = `${book.available_count}/${book.total_count}`;
+    $('detailPrice').textContent = (book.price || 0).toFixed(2);
     $('detailDescription').textContent = book.description || '暂无简介';
     $('detailCover').src = book.cover_image ? `/uploads/${book.cover_image}` : '/static/placeholder-cover.png';
     
@@ -471,7 +659,7 @@ async function reserveBookFromDetail() {
   if (!state.currentDetailBookId) return;
   if (!confirm('确认预约这本图书？当图书归还时，您将收到通知。')) return;
   try {
-    await api('/api/reservations', { method: 'POST', body: JSON.stringify({ book_id: state.currentDetailBookId }) });
+    await api('/api/reservations', { method: 'POST', body: JSON.stringify({ book_id: state.currentDetailBookId, reader_id: state.user.id }) });
     toast('预约成功！当图书归还时您将收到通知', 'success');
     closeBookDetailModal();
   } catch (e) {
@@ -482,18 +670,132 @@ async function reserveBookFromDetail() {
 function editBook(id) {
   const book = state.lastBooks.find(x => x.id === id);
   if (!book) return;
-  $('bookId').value = book.id;
-  $('bookIsbn').value = book.isbn;
-  $('bookTitle').value = book.title;
-  $('bookAuthor').value = book.author;
-  $('bookPublisher').value = book.publisher;
-  $('bookCategory').value = book.category;
-  $('bookTotal').value = book.total_count;
-  $('bookAvailable').value = book.available_count;
-  $('bookShelf').value = book.shelf_location;
-  $('bookDescription').value = book.description;
-  $('bookFormTitle').textContent = `编辑图书 #${book.id}`;
-  toast('已填入表单，可修改后保存');
+  
+  // 打开弹窗并填充数据
+  openBookFormModal(book);
+}
+
+// 打开图书表单弹窗
+function openBookFormModal(book = null) {
+  $('bookFormModal').classList.remove('hidden');
+  
+  if (book) {
+    // 编辑模式
+    $('bookFormTitle').textContent = `编辑图书 #${book.id}`;
+    $('bookId').value = book.id;
+    $('bookIsbn').value = book.isbn;
+    $('bookTitle').value = book.title;
+    $('bookAuthor').value = book.author;
+    $('bookPublisher').value = book.publisher || '';
+    $('bookCategory').value = book.category;
+    $('bookTotal').value = book.total_count;
+    $('bookAvailable').value = book.available_count;
+    $('bookPrice').value = book.price || 0;
+    $('bookShelf').value = book.shelf_location || '';
+    $('bookDescription').value = book.description || '';
+    updateCharCount();
+  } else {
+    // 新增模式
+    $('bookFormTitle').textContent = '新增图书';
+    resetBookFormFields();
+  }
+}
+
+// 关闭图书表单弹窗
+function closeBookFormModal() {
+  $('bookFormModal').classList.add('hidden');
+  resetBookFormFields();
+}
+
+// 重置表单字段
+function resetBookFormFields() {
+  $('bookId').value = '';
+  $('bookIsbn').value = '';
+  $('bookTitle').value = '';
+  $('bookAuthor').value = '';
+  $('bookPublisher').value = '';
+  $('bookPublisherCustom').value = '';
+  $('bookCategory').value = '';
+  $('bookCategoryCustom').value = '';
+  $('bookTotal').value = '';
+  $('bookAvailable').value = '';
+  $('bookPrice').value = '';
+  $('bookShelf').value = '';
+  $('bookShelfCustom').value = '';
+  $('bookDescription').value = '';
+  updateCharCount();
+}
+
+// 提交图书表单
+async function submitBookForm() {
+  const bookId = $('bookId').value;
+  const isbn = $('bookIsbn').value.trim();
+  const title = $('bookTitle').value.trim();
+  const author = $('bookAuthor').value.trim();
+  const publisher = $('bookPublisherCustom').value.trim() || $('bookPublisher').value;
+  const category = $('bookCategoryCustom').value.trim() || $('bookCategory').value;
+  const total_count = parseInt($('bookTotal').value);
+  const available_count = parseInt($('bookAvailable').value) || total_count;
+  const price = parseFloat($('bookPrice').value) || 0;
+  const shelf_location = $('bookShelfCustom').value.trim() || $('bookShelf').value;
+  const description = $('bookDescription').value.trim();
+  
+  // 基本校验
+  if (!isbn || !title || !author || !category || !total_count) {
+    toast('请填写所有必填项', 'error');
+    return;
+  }
+  
+  // ISBN校验
+  if (!validateISBN(isbn)) {
+    toast('请输入10或13位有效ISBN', 'error');
+    return;
+  }
+  
+  // 库存校验
+  if (!validateStock()) {
+    toast('库存数量设置不正确', 'error');
+    return;
+  }
+  
+  const payload = {
+    isbn,
+    title,
+    author,
+    publisher,
+    category,
+    total_count,
+    available_count,
+    price,
+    shelf_location,
+    description
+  };
+  
+  try {
+    if (bookId) {
+      // 编辑
+      await api(`/api/books/${bookId}`, { method: 'PUT', body: JSON.stringify(payload) });
+      toast(`《${title}》更新成功`, 'success');
+    } else {
+      // 新增
+      await api('/api/books', { method: 'POST', body: JSON.stringify(payload) });
+      toast(`《${title}》新增成功`, 'success');
+    }
+    closeBookFormModal();
+    loadBooks();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+// 更新字符计数
+function updateCharCount() {
+  const desc = $('bookDescription');
+  const count = desc.value.length;
+  const counter = desc.parentElement.querySelector('.char-count');
+  if (counter) {
+    counter.textContent = `${count}/500`;
+  }
 }
 
 async function deleteBook(id) {
@@ -546,7 +848,7 @@ async function confirmPasswordReset() {
   try {
     await api(`/api/readers/${pendingResetReaderId}/reset-password`, { 
       method: 'POST', 
-      body: JSON.stringify({ reader_id: pendingResetReaderId, new_password: newPassword }) 
+      body: JSON.stringify({ new_password: newPassword }) 
     });
     toast('密码重置成功', 'success');
     closePasswordModal();
@@ -638,6 +940,7 @@ async function loadRecords() {
   const status = encodeURIComponent($('recordStatus').value || '');
   const keyword = encodeURIComponent($('recordKeyword').value || '');
   const data = await api(`/api/borrow-records?status=${status}&keyword=${keyword}&page=${state.recordPage}&page_size=8`);
+  state.lastRecords = data.items; // 保存记录以便二次确认时使用
   $('recordPageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
   
   // 生成操作按钮
@@ -681,20 +984,30 @@ async function loadRecords() {
 }
 
 async function returnBook(recordId) {
-  if (!confirm('确认归还这本书？')) return;
-  try { await api(`/api/borrow-records/${recordId}/return`, { method: 'PATCH' }); toast('归还成功，库存已恢复', 'success'); loadRecords(); loadDashboard(); }
+  // 获取记录信息
+  const record = state.lastRecords.find(r => r.id === recordId);
+  const bookTitle = record ? record.book_title : '该图书';
+  if (!confirm(`确认归还《${bookTitle}》？`)) return;
+  try { 
+    await api(`/api/borrow-records/${recordId}/return`, { method: 'PATCH' }); 
+    toast('归还成功，库存已恢复', 'success'); 
+    loadRecords(); 
+    loadDashboard(); 
+  }
   catch (e) { toast(e.message, 'error'); }
 }
 
 async function renewBook(recordId) {
-  const days = prompt('请输入续借天数（1-90天）：', '15');
+  const record = state.lastRecords.find(r => r.id === recordId);
+  const bookTitle = record ? record.book_title : '该图书';
+  const days = prompt(`为《${bookTitle}》输入续借天数（1-90天）：`, '15');
   if (!days || isNaN(days) || parseInt(days) < 1 || parseInt(days) > 90) {
     toast('请输入有效的续借天数', 'error');
     return;
   }
   try { 
     await api(`/api/borrow-records/${recordId}/renew`, { method: 'PATCH', body: JSON.stringify({ days: parseInt(days) }) }); 
-    toast(`续借成功，已延长${days}天`, 'success'); 
+    toast(`《${bookTitle}》续借成功，已延长${days}天`, 'success'); 
     loadRecords(); 
   }
   catch (e) { toast(e.message, 'error'); }
@@ -1116,14 +1429,20 @@ $('bookSearchBtn').addEventListener('click', () => { state.bookPage = 1; loadBoo
 $('categoryFilter').addEventListener('change', () => { state.bookPage = 1; loadBooks(); });
 $('bookPrev').addEventListener('click', () => { if (state.bookPage > 1) { state.bookPage--; loadBooks(); } });
 $('bookNext').addEventListener('click', () => { state.bookPage++; loadBooks(); });
+$('addBookBtn').addEventListener('click', () => openBookFormModal());
 $('importBooksBtn').addEventListener('click', () => $('importBooksFile').click());
 $('importBooksFile').addEventListener('change', importBooks);
-$('resetBookForm').addEventListener('click', resetBookForm);
+$('resetBookForm').addEventListener('click', () => {
+  if (confirm('确认清空表单内容？')) {
+    resetBookFormFields();
+  }
+});
 $('bookForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const payload = {
     isbn: $('bookIsbn').value, title: $('bookTitle').value, author: $('bookAuthor').value, publisher: $('bookPublisher').value,
     category: $('bookCategory').value, total_count: Number($('bookTotal').value), available_count: $('bookAvailable').value === '' ? null : Number($('bookAvailable').value), shelf_location: $('bookShelf').value, description: $('bookDescription').value,
+    price: $('bookPrice').value === '' ? 0.0 : parseFloat($('bookPrice').value),
   };
   if (payload.available_count !== null && payload.available_count > payload.total_count) return toast('可借数量不能大于馆藏总数', 'error');
   try {
@@ -1311,11 +1630,12 @@ async function sendForgotCode() {
 async function handleRegister(e) {
   e.preventDefault();
   const username = $('registerUsername').value;
+  const full_name = $('registerFullName').value;
   const phone = $('registerPhone').value;
   const code = $('registerCode').value;
   const password = $('registerPassword').value;
   
-  if (!username || !phone || !code || !password) {
+  if (!username || !full_name || !phone || !code || !password) {
     return toast('请填写完整信息', 'error');
   }
   if (password.length < 6) {
@@ -1325,7 +1645,7 @@ async function handleRegister(e) {
   try {
     await api('/api/auth/register', { 
       method: 'POST', 
-      body: JSON.stringify({ username, phone, code, password }) 
+      body: JSON.stringify({ username, full_name, phone, code, password }) 
     });
     toast('注册成功，请登录', 'success');
     showLoginPage();
@@ -1407,6 +1727,47 @@ $('sendForgotCodeBtn').addEventListener('click', sendForgotCode);
 $('registerForm').addEventListener('submit', handleRegister);
 $('forgotPasswordForm').addEventListener('submit', handleForgotPassword);
 $('changePasswordBtn').addEventListener('click', showChangePasswordModal);
+
+// 时间筛选器事件绑定
+document.querySelectorAll('.time-filter-btn').forEach(btn => {
+  btn.addEventListener('click', function() {
+    // 移除所有active类
+    document.querySelectorAll('.time-filter-btn').forEach(b => b.classList.remove('active'));
+    // 添加当前按钮的active类
+    this.classList.add('active');
+    // 更新时间范围
+    state.dashboardTimeRange = parseInt(this.dataset.days);
+    // 重新加载仪表盘
+    loadDashboard();
+  });
+});
+
+// 自定义日期应用按钮
+if ($('applyCustomDate')) {
+  $('applyCustomDate').addEventListener('click', function() {
+    const startDate = $('customStartDate').value;
+    const endDate = $('customEndDate').value;
+    
+    if (!startDate || !endDate) {
+      return toast('请选择开始和结束日期', 'error');
+    }
+    
+    if (new Date(startDate) > new Date(endDate)) {
+      return toast('开始日期不能晚于结束日期', 'error');
+    }
+    
+    // 计算天数差
+    const days = Math.ceil((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24));
+    state.dashboardTimeRange = days;
+    
+    // 更新按钮状态
+    document.querySelectorAll('.time-filter-btn').forEach(b => b.classList.remove('active'));
+    
+    // 重新加载仪表盘
+    loadDashboard();
+    toast(`已应用自定义日期范围：${days}天`, 'success');
+  });
+}
 
 // Initialize on page load
 window.addEventListener('DOMContentLoaded', initAuth);

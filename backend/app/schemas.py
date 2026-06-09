@@ -43,6 +43,7 @@ class BookCreate(BaseModel):
     available_count: Optional[int] = Field(default=None, ge=0)
     shelf_location: str = Field(default="", max_length=40)
     description: str = Field(default="", max_length=500)
+    price: float = Field(default=0.0, ge=0)
 
 
 class BookUpdate(BaseModel):
@@ -55,6 +56,7 @@ class BookUpdate(BaseModel):
     available_count: Optional[int] = Field(default=None, ge=0)
     shelf_location: Optional[str] = Field(default=None, max_length=40)
     description: Optional[str] = Field(default=None, max_length=500)
+    price: Optional[float] = Field(default=None, ge=0)
 
 
 class ReaderCreate(BaseModel):
@@ -148,7 +150,6 @@ class ReaderImportItem(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    reader_id: int = Field(..., ge=1)
     new_password: str = Field(..., min_length=6, max_length=100)
 
 

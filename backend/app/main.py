@@ -244,16 +244,17 @@ async def import_books(file: UploadFile = File(...), current_user: Dict[str, Any
                 available_count = int(row.get("available_count", total_count))
                 shelf_location = row.get("shelf_location", "").strip()
                 description = row.get("description", "").strip()
+                price = float(row.get("price", 0))
                 
                 if not isbn or not title or not author or not category:
                     raise ValueError("ISBN、书名、作者、分类不能为空")
                 
                 conn.execute(
                     """
-                    INSERT INTO books(isbn, title, author, publisher, category, total_count, available_count, shelf_location, description)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO books(isbn, title, author, publisher, category, total_count, available_count, shelf_location, description, price)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (isbn, title, author, publisher, category, total_count, available_count, shelf_location, description)
+                    (isbn, title, author, publisher, category, total_count, available_count, shelf_location, description, price)
                 )
                 success_count += 1
             except Exception as e:
@@ -488,12 +489,16 @@ def stats_top_books(_: Dict[str, Any] = Depends(get_current_user)):
     return {"items": stats_service.top_books()}
 
 
-@app.get("/api/export/books", response_class=PlainTextResponse)
-def export_books(_: Dict[str, Any] = Depends(get_current_user)):
-    return PlainTextResponse(export_service.export_books(), media_type="text/csv; charset=utf-8")
+@app.get("/api/books/export", response_class=PlainTextResponse)
+def export_books(
+    search: str = "",
+    category: str = "",
+    _: Dict[str, Any] = Depends(get_current_user)
+):
+    return PlainTextResponse(export_service.export_books(search=search, category=category), media_type="text/csv; charset=utf-8")
 
 
-@app.get("/api/export/borrow-records", response_class=PlainTextResponse)
+@app.get("/api/borrow-records/export", response_class=PlainTextResponse)
 def export_records(current_user: Dict[str, Any] = Depends(get_current_user)):
     return PlainTextResponse(export_service.export_records(current_user), media_type="text/csv; charset=utf-8")
 
@@ -525,6 +530,12 @@ def create_announcement(data: AnnouncementCreate, current_user: Dict[str, Any] =
         details=f"创建公告: {data.title}"
     )
     return result
+
+
+@app.get("/api/announcements/{announcement_id}")
+def get_announcement(announcement_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取单个公告详情"""
+    return announcement_service.get_announcement(announcement_id)
 
 
 @app.put("/api/announcements/{announcement_id}")
