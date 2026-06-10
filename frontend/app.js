@@ -433,11 +433,25 @@ async function loadBooks() {
   $('categoryFilter').innerHTML = '<option value="">全部分类</option>' + data.categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
   $('categoryFilter').value = decodeURIComponent(category);
 
+  // 更新导出按钮状态
+  const exportBtn = $('exportBooksBtn');
+  if (exportBtn) {
+    if (data.total === 0) {
+      exportBtn.disabled = true;
+      exportBtn.style.opacity = '0.5';
+      exportBtn.title = '暂无数据可导出';
+    } else {
+      exportBtn.disabled = false;
+      exportBtn.style.opacity = '1';
+      exportBtn.title = '';
+    }
+  }
+
   // 加载下拉选项（分类、出版社、书架）
   await loadDropdownOptions();
 
   // 卡片式展示
-  $('bookGrid').innerHTML = data.items.length ? data.items.map(book => `
+  $('bookGrid').innerHTML = data.items.length > 0 ? data.items.map(book => `
     <div class="book-card" onclick="showBookDetail(${book.id})" style="cursor: pointer;">
       <div class="book-cover">
         <img src="${book.cover_image ? `/uploads/${book.cover_image}` : '/static/placeholder-cover.png'}" alt="${escapeHtml(book.title)}" />
@@ -459,7 +473,7 @@ async function loadBooks() {
         </div>
       </div>
     </div>
-  `).join('') : '<div class="empty-state"><p>未找到匹配图书，请调整关键词或筛选条件</p></div>';
+  `).join('') : '<div class="empty-state"><p>暂无匹配图书</p></div>';
 }
 
 // 加载下拉选择框选项
@@ -583,9 +597,24 @@ async function showBookDetail(bookId) {
     $('detailPublisher').textContent = book.publisher || '未知';
     $('detailCategory').textContent = book.category;
     $('detailShelf').textContent = book.shelf_location || '未知';
-    $('detailStock').textContent = `${book.available_count}/${book.total_count}`;
-    $('detailPrice').textContent = (book.price || 0).toFixed(2);
-    $('detailDescription').textContent = book.description || '暂无简介';
+    $('detailStock').textContent = `可借：${book.available_count} / 馆藏：${book.total_count}`;
+    const price = book.price || 0;
+    $('detailPrice').textContent = price > 0 ? `¥${price.toFixed(2)}` : '暂无定价';
+    
+    const description = book.description || '暂无简介';
+    $('detailDescription').textContent = description;
+    state.currentDetailDescription = description;
+    
+    // 处理简介折叠
+    const descBtn = $('toggleDescBtn');
+    if (description.length > 500) {
+      $('detailDescription').textContent = description.substring(0, 500) + '...';
+      descBtn.textContent = '展开';
+      descBtn.classList.remove('hidden');
+    } else {
+      descBtn.classList.add('hidden');
+    }
+    
     $('detailCover').src = book.cover_image ? `/uploads/${book.cover_image}` : '/static/placeholder-cover.png';
 
     // 获取借阅次数
@@ -599,12 +628,18 @@ async function showBookDetail(bookId) {
       $('detailCoverUpload').classList.add('hidden');
     }
 
-    // 根据库存显示借阅或预约按钮
+    // 根据库存设置借阅按钮状态
+    const borrowBtn = $('detailBorrowBtn');
     if (book.available_count > 0) {
-      $('detailBorrowBtn').classList.remove('hidden');
+      borrowBtn.classList.remove('hidden', 'disabled');
+      borrowBtn.textContent = '借阅';
+      borrowBtn.disabled = false;
       $('detailReserveBtn').classList.add('hidden');
     } else {
-      $('detailBorrowBtn').classList.add('hidden');
+      borrowBtn.classList.remove('hidden');
+      borrowBtn.classList.add('disabled');
+      borrowBtn.textContent = '暂无可借库存';
+      borrowBtn.disabled = true;
       $('detailReserveBtn').classList.remove('hidden');
     }
 
@@ -614,6 +649,19 @@ async function showBookDetail(bookId) {
     $('bookDetailModal').classList.remove('hidden');
   } catch (e) {
     toast('加载图书详情失败: ' + e.message, 'error');
+  }
+}
+
+function toggleDescription() {
+  const descBtn = $('toggleDescBtn');
+  const descElement = $('detailDescription');
+  
+  if (descBtn.textContent === '展开') {
+    descElement.textContent = state.currentDetailDescription;
+    descBtn.textContent = '收起';
+  } else {
+    descElement.textContent = state.currentDetailDescription.substring(0, 500) + '...';
+    descBtn.textContent = '展开';
   }
 }
 
@@ -1117,18 +1165,216 @@ function resetReaderForm() {
   $('readerForm').reset(); $('readerId').value = ''; $('readerUsername').disabled = false;
 }
 
-function editReader(id) {
+// ========== 编辑读者弹窗函数 ==========
+function openEditReaderModal(id) {
   const r = state.lastReaders.find(x => x.id === id);
   if (!r) return;
-  $('readerId').value = r.id;
-  $('readerUsername').value = r.username;
-  $('readerUsername').disabled = true;
-  $('readerPassword').value = '';
-  $('readerFullName').value = r.full_name;
-  $('readerStatus').value = r.status;
-  $('readerPhone').value = r.phone;
-  $('readerEmail').value = r.email;
-  $('readerDepartment').value = r.department;
+  
+  // 保存原始数据用于清空恢复
+  $('editReaderId').value = r.id;
+  $('editReaderTitle').textContent = '编辑读者';
+  
+  // 填充表单
+  $('editReaderUsername').value = r.username || '';
+  $('editReaderFullName').value = r.full_name || '';
+  $('editReaderPhone').value = r.phone || '';
+  $('editReaderEmail').value = r.email || '';
+  $('editReaderDepartment').value = r.department || '';
+  $('editReaderRole').value = r.role || 'student';
+  $('editReaderMaxDays').value = r.max_borrow_days || '';
+  $('editReaderMaxBooks').value = r.max_books || '';
+  
+  // 清除验证错误
+  clearValidationErrors('editReaderForm');
+  
+  // 显示弹窗
+  $('editReaderModal').classList.remove('hidden');
+}
+
+function closeEditReaderModal() {
+  $('editReaderModal').classList.add('hidden');
+  clearValidationErrors('editReaderForm');
+}
+
+function resetEditReaderForm() {
+  const id = parseInt($('editReaderId').value);
+  const r = state.lastReaders.find(x => x.id === id);
+  if (!r) return;
+  
+  // 恢复为原始数据
+  $('editReaderFullName').value = r.full_name || '';
+  $('editReaderPhone').value = r.phone || '';
+  $('editReaderEmail').value = r.email || '';
+  $('editReaderDepartment').value = r.department || '';
+  $('editReaderRole').value = r.role || 'student';
+  $('editReaderMaxDays').value = r.max_borrow_days || '';
+  $('editReaderMaxBooks').value = r.max_books || '';
+  
+  clearValidationErrors('editReaderForm');
+}
+
+function clearValidationErrors(formId) {
+  const form = $(formId);
+  if (!form) return;
+  form.querySelectorAll('.validation-error').forEach(el => el.textContent = '');
+}
+
+function showFieldError(input, message) {
+  const errorEl = input.closest('label')?.querySelector('.validation-error');
+  if (errorEl) {
+    errorEl.textContent = message;
+    errorEl.style.display = 'block';
+  }
+}
+
+async function submitEditReader() {
+  const id = parseInt($('editReaderId').value);
+  const btn = $('submitEditReaderBtn');
+  const originalText = btn.textContent;
+  
+  // 获取表单数据
+  const fullName = $('editReaderFullName').value.trim();
+  const phone = $('editReaderPhone').value.trim();
+  const email = $('editReaderEmail').value.trim();
+  const department = $('editReaderDepartment').value;
+  const role = $('editReaderRole').value;
+  const maxDays = $('editReaderMaxDays').value ? parseInt($('editReaderMaxDays').value) : null;
+  const maxBooks = $('editReaderMaxBooks').value ? parseInt($('editReaderMaxBooks').value) : null;
+  
+  // 清除之前的错误
+  clearValidationErrors('editReaderForm');
+  
+  // 表单校验
+  let hasError = false;
+  
+  if (!fullName) {
+    showFieldError($('editReaderFullName'), '姓名不能为空');
+    hasError = true;
+  }
+  
+  if (!phone) {
+    showFieldError($('editReaderPhone'), '手机号不能为空');
+    hasError = true;
+  } else if (!/^1\d{10}$/.test(phone)) {
+    showFieldError($('editReaderPhone'), '手机号必须为11位数字');
+    hasError = true;
+  }
+  
+  if (!department) {
+    showFieldError($('editReaderDepartment'), '请选择院系');
+    hasError = true;
+  }
+  
+  if (hasError) return;
+  
+  // 显示加载状态
+  btn.disabled = true;
+  btn.textContent = '保存中...';
+  
+  try {
+    await api(`/api/readers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        full_name: fullName,
+        phone: phone,
+        email: email,
+        department: department,
+        role: role,
+        max_borrow_days: maxDays,
+        max_books: maxBooks
+      })
+    });
+    
+    toast('读者信息修改成功', 'success');
+    closeEditReaderModal();
+    loadReaders();
+    loadBorrowOptions();
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+// ========== 重置密码弹窗函数 ==========
+function openResetPwdModal(id) {
+  const r = state.lastReaders.find(x => x.id === id);
+  if (!r) return;
+  
+  $('resetPwdReaderId').value = r.id;
+  $('resetPwdUsername').value = r.username || '';
+  $('resetPwdFullName').value = r.full_name || '';
+  $('resetPwdNew').value = '';
+  $('resetPwdConfirm').value = '';
+  
+  clearValidationErrors('resetPwdForm');
+  $('resetPwdModal').classList.remove('hidden');
+}
+
+function closeResetPwdModal() {
+  $('resetPwdModal').classList.add('hidden');
+  clearValidationErrors('resetPwdForm');
+}
+
+async function submitResetPwd() {
+  const btn = $('submitResetPwdBtn');
+  const originalText = btn.textContent;
+  
+  const newPwd = $('resetPwdNew').value;
+  const confirmPwd = $('resetPwdConfirm').value;
+  
+  clearValidationErrors('resetPwdForm');
+  
+  // 表单校验
+  let hasError = false;
+  
+  if (!newPwd) {
+    showFieldError($('resetPwdNew'), '请输入新密码');
+    hasError = true;
+  } else if (newPwd.length < 6) {
+    showFieldError($('resetPwdNew'), '密码至少需要6位');
+    hasError = true;
+  }
+  
+  if (!confirmPwd) {
+    showFieldError($('resetPwdConfirm'), '请再次输入新密码');
+    hasError = true;
+  } else if (newPwd !== confirmPwd) {
+    showFieldError($('resetPwdConfirm'), '两次输入的密码不一致');
+    hasError = true;
+  }
+  
+  if (hasError) return;
+  
+  // 显示加载状态
+  btn.disabled = true;
+  btn.textContent = '重置中...';
+  
+  try {
+    const readerId = parseInt($('resetPwdReaderId').value);
+    await api(`/api/readers/${readerId}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ new_password: newPwd })
+    });
+    
+    toast('密码重置成功', 'success');
+    closeResetPwdModal();
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+// 兼容旧的函数名（如果其他地方有调用）
+function editReader(id) {
+  openEditReaderModal(id);
+}
+
+function resetReaderPassword(id) {
+  openResetPwdModal(id);
 }
 
 async function deleteReader(id) {
@@ -2607,8 +2853,32 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 $('logoutBtn').addEventListener('click', () => logout(true));
 document.querySelectorAll('.nav').forEach(btn => btn.addEventListener('click', () => switchView(btn.dataset.view)));
-$('bookSearchBtn').addEventListener('click', () => { state.bookPage = 1; loadBooks(); });
-$('categoryFilter').addEventListener('change', () => { state.bookPage = 1; loadBooks(); });
+$('bookSearchBtn').addEventListener('click', async () => {
+  const btn = $('bookSearchBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '搜索中...';
+  state.bookPage = 1;
+  try {
+    await loadBooks();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+});
+$('categoryFilter').addEventListener('change', async () => {
+  const btn = $('bookSearchBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '筛选中...';
+  state.bookPage = 1;
+  try {
+    await loadBooks();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+});
 $('bookPrev').addEventListener('click', () => { if (state.bookPage > 1) { state.bookPage--; loadBooks(); } });
 $('bookNext').addEventListener('click', () => { state.bookPage++; loadBooks(); });
 $('addBookBtn').addEventListener('click', () => openBookFormModal());
@@ -2644,6 +2914,15 @@ $('importReadersFile').addEventListener('change', handleImportReaders);
 // $('readerForm').addEventListener('submit', ...); // 已移除
 // 新增读者按钮事件绑定
 $('addReaderBtn')?.addEventListener('click', () => openReaderFormModal());
+
+// 编辑读者弹窗按钮事件绑定
+$('submitEditReaderBtn')?.addEventListener('click', submitEditReader);
+$('cancelEditReaderBtn')?.addEventListener('click', closeEditReaderModal);
+
+// 重置密码弹窗按钮事件绑定
+$('submitResetPwdBtn')?.addEventListener('click', submitResetPwd);
+$('cancelResetPwdBtn')?.addEventListener('click', closeResetPwdModal);
+
 $('recordSearchBtn')?.addEventListener('click', () => { state.recordPage = 1; loadRecords(); });
 $('recordPrev')?.addEventListener('click', () => { if (state.recordPage > 1) { state.recordPage--; loadRecords(); } });
 $('recordNext')?.addEventListener('click', () => { state.recordPage++; loadRecords(); });
@@ -2736,8 +3015,34 @@ $('exportOverdueBtn')?.addEventListener('click', async () => {
 $('overduePrev')?.addEventListener('click', () => { if (overduePage > 1) { overduePage--; loadOverdue(); } });
 $('overdueNext')?.addEventListener('click', () => { if (overduePage < totalPages) { overduePage++; loadOverdue(); } });
 $('exportBooksBtn')?.addEventListener('click', async () => {
-  try { const csv = await api(`/api/books/export?search=${encodeURIComponent($('bookSearch').value || '')}&category=${encodeURIComponent($('categoryFilter').value || '')}`); downloadCsv('图书列表.csv', csv); }
-  catch (e) { toast(e.message, 'error'); }
+  const btn = $('exportBooksBtn');
+  const originalText = btn.textContent;
+  
+  // 检查是否有数据可导出
+  const totalText = $('bookTotalText').textContent;
+  const match = totalText.match(/共 (\d+) 本/);
+  const totalCount = match ? parseInt(match[1]) : 0;
+  
+  if (totalCount === 0) {
+    toast('暂无数据可导出', 'warning');
+    return;
+  }
+  
+  btn.disabled = true;
+  btn.textContent = '导出中...';
+  
+  try {
+    const csv = await api(`/api/books/export?search=${encodeURIComponent($('bookSearch').value || '')}&category=${encodeURIComponent($('categoryFilter').value || '')}`);
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+    downloadCsv(`图书列表_${dateStr}.csv`, csv);
+    toast('导出成功', 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
 });
 $('exportRecordsBtn')?.addEventListener('click', async () => {
   try { const csv = await api(`/api/borrow-records/export?status=${encodeURIComponent($('recordStatus').value || '')}&keyword=${encodeURIComponent($('recordKeyword').value || '')}`); downloadCsv('借还记录.csv', csv); }

@@ -395,6 +395,146 @@
         </div>
       </div>
 
+      <!-- 编辑读者弹窗 -->
+      <div id="editReaderModal" class="modal hidden">
+        <div class="modal-content reader-form-modal square-modal">
+          <div class="modal-header sticky-header">
+            <h3 id="editReaderTitle">编辑读者</h3>
+            <button class="close-btn" onclick="closeEditReaderModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form id="editReaderForm" class="form-grid">
+              <input type="hidden" id="editReaderId" />
+
+              <!-- 基本信息 -->
+              <div class="form-section">
+                <h4>基本信息</h4>
+                <div class="form-row">
+                  <label>用户名
+                    <input id="editReaderUsername" readonly class="readonly-input" />
+                  </label>
+                  <label>姓名
+                    <input id="editReaderFullName" required placeholder="请输入读者姓名（必填）" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>手机号
+                    <input id="editReaderPhone" required placeholder="请输入11位手机号（必填）" maxlength="11" />
+                    <span class="validation-error"></span>
+                  </label>
+                  <label>邮箱
+                    <input id="editReaderEmail" placeholder="请输入邮箱地址" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- 所属信息 -->
+              <div class="form-section">
+                <h4>所属信息</h4>
+                <div class="form-row">
+                  <label>院系
+                    <div class="select-wrapper">
+                      <select id="editReaderDepartment" class="closable-select" required>
+                        <option value="">请选择所属院系（必填）</option>
+                        <option>计算机学院</option>
+                        <option>软件学院</option>
+                        <option>信息工程学院</option>
+                        <option>经管学院</option>
+                        <option>文学院</option>
+                        <option>外国语学院</option>
+                        <option>艺术学院</option>
+                        <option>理学院</option>
+                        <option>机械学院</option>
+                        <option>电子学院</option>
+                      </select>
+                      <button type="button" class="select-clear" onclick="clearSelect('editReaderDepartment')">&times;</button>
+                    </div>
+                    <span class="validation-error"></span>
+                  </label>
+                  <label>身份角色
+                    <select id="editReaderRole">
+                      <option value="student">学生</option>
+                      <option value="teacher">老师</option>
+                      <option value="admin">管理员</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <!-- 借阅规则 -->
+              <div class="form-section">
+                <h4>借阅规则</h4>
+                <div class="form-row">
+                  <label>可借阅天数
+                    <input id="editReaderMaxDays" type="number" min="1" placeholder="90" />
+                  </label>
+                  <label>最大可借数量
+                    <input id="editReaderMaxBooks" type="number" min="1" placeholder="10" />
+                  </label>
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button id="cancelEditReaderBtn" class="ghost" type="button">取消</button>
+            <button id="submitEditReaderBtn" class="primary">保存</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 重置密码弹窗 -->
+      <div id="resetPwdModal" class="modal hidden">
+        <div class="modal-content">
+          <div class="modal-header sticky-header">
+            <h3>重置密码</h3>
+            <button class="close-btn" onclick="closeResetPwdModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form id="resetPwdForm" class="form-grid">
+              <input type="hidden" id="resetPwdReaderId" />
+              
+              <!-- 读者信息 -->
+              <div class="form-section">
+                <h4>读者信息</h4>
+                <div class="form-row">
+                  <label>用户名
+                    <input id="resetPwdUsername" readonly class="readonly-input" />
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>姓名
+                    <input id="resetPwdFullName" readonly class="readonly-input" />
+                  </label>
+                </div>
+              </div>
+
+              <!-- 密码设置 -->
+              <div class="form-section">
+                <h4>密码设置</h4>
+                <div class="form-row">
+                  <label>新密码 <span class="required">*</span>
+                    <input id="resetPwdNew" type="password" required placeholder="请输入新密码" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>确认密码 <span class="required">*</span>
+                    <input id="resetPwdConfirm" type="password" required placeholder="请再次输入新密码" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button id="cancelResetPwdBtn" class="ghost" type="button">取消</button>
+            <button id="submitResetPwdBtn" class="primary">重置密码</button>
+          </div>
+        </div>
+      </div>
+
       <section id="records" class="view">
         <article class="panel records-panel">
           <div class="toolbar records-toolbar">
@@ -706,25 +846,57 @@
         <button class="close-btn" onclick="closeBookDetailModal()">&times;</button>
       </div>
       <div class="modal-body book-detail-body">
-        <div class="book-detail-cover">
+        <div class="book-detail-cover-section">
           <img id="detailCover" src="/static/placeholder-cover.png" alt="图书封面" />
-          <label id="detailCoverUpload" class="detail-cover-upload hidden"><input type="file" accept="image/*" onchange="uploadDetailCover(this)" /><span>更换封面</span></label>
+          <label id="detailCoverUpload" class="detail-cover-upload hidden">
+            <input type="file" accept="image/*" onchange="uploadDetailCover(this)" />
+            <span>更换封面</span>
+          </label>
         </div>
-        <div class="book-detail-info">
-          <h2 id="detailTitle">书名</h2>
-          <p id="detailAuthor" class="detail-author">作者</p>
-          <div class="detail-meta">
-            <p><strong>ISBN:</strong> <span id="detailIsbn"></span></p>
-            <p><strong>出版社:</strong> <span id="detailPublisher"></span></p>
-            <p><strong>分类:</strong> <span id="detailCategory"></span></p>
-            <p><strong>书架位置:</strong> <span id="detailShelf"></span></p>
-            <p><strong>库存:</strong> <span id="detailStock"></span></p>
-            <p><strong>价格:</strong> ¥<span id="detailPrice">0.00</span></p>
-            <p><strong>借阅次数:</strong> <span id="detailBorrowCount"></span></p>
+        <div class="book-detail-main">
+          <div class="book-detail-header">
+            <h2 id="detailTitle">书名</h2>
+            <p id="detailAuthor" class="detail-author">作者</p>
           </div>
-          <div class="detail-description">
-            <strong>简介:</strong>
-            <p id="detailDescription">暂无简介</p>
+          <div class="book-detail-meta-section">
+            <h4>基础信息</h4>
+            <div class="detail-meta">
+              <div class="meta-row">
+                <span class="meta-label">ISBN:</span>
+                <span id="detailIsbn" class="meta-value"></span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">出版社:</span>
+                <span id="detailPublisher" class="meta-value"></span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">分类:</span>
+                <span id="detailCategory" class="meta-value"></span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">书架位置:</span>
+                <span id="detailShelf" class="meta-value"></span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">库存:</span>
+                <span id="detailStock" class="meta-value highlight"></span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">价格:</span>
+                <span id="detailPrice" class="meta-value highlight">¥0.00</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">借阅次数:</span>
+                <span id="detailBorrowCount" class="meta-value"></span>
+              </div>
+            </div>
+          </div>
+          <div class="book-detail-desc-section">
+            <h4><strong>简介:</strong></h4>
+            <div class="detail-description">
+              <p id="detailDescription">暂无简介</p>
+              <button id="toggleDescBtn" class="toggle-desc-btn hidden" onclick="toggleDescription()">展开</button>
+            </div>
           </div>
         </div>
       </div>
