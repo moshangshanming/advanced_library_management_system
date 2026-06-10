@@ -25,23 +25,23 @@
       </div>
       <div class="login-links">
         <button id="registerLink" class="link-btn">注册账号</button>
-        <button id="forgotPasswordLink" class="link-btn">忘记密码</button>
       </div>
     </section>
 
     <!-- 注册卡片 -->
     <section id="registerCard" class="login-card hidden">
       <div class="brand-mark">L</div>
-      <h1>用户注册</h1>
+      <h1>账号注册</h1>
         <p>创建您的图书馆账号</p>
         <form id="registerForm" class="form-grid">
+          <label>账号类型
+            <select id="registerRole" required>
+              <option value="reader">用户注册</option>
+              <option value="admin">管理员注册</option>
+            </select>
+          </label>
           <label>用户名<input id="registerUsername" placeholder="请输入用户名" required /></label>
           <label>姓名<input id="registerFullName" placeholder="请输入真实姓名" required /></label>
-          <label>手机号<input id="registerPhone" placeholder="请输入手机号" required /></label>
-          <div class="code-row">
-            <label>验证码<input id="registerCode" placeholder="请输入验证码" required /></label>
-            <button type="button" id="sendRegisterCodeBtn" class="primary code-btn">发送验证码</button>
-          </div>
           <label>密码<input id="registerPassword" type="password" placeholder="请输入密码（至少6位）" required /></label>
           <button class="primary full" type="submit">注册账号</button>
         </form>
@@ -50,24 +50,6 @@
       </div>
     </section>
 
-    <!-- 忘记密码卡片 -->
-    <section id="forgotPasswordCard" class="login-card hidden">
-      <div class="brand-mark">L</div>
-      <h1>忘记密码</h1>
-      <p>通过手机号验证码找回密码</p>
-      <form id="forgotPasswordForm" class="form-grid">
-        <label>手机号<input id="forgotPhone" placeholder="请输入手机号" required /></label>
-        <div class="code-row">
-          <label>验证码<input id="forgotCode" placeholder="请输入验证码" required /></label>
-          <button type="button" id="sendForgotCodeBtn" class="primary code-btn">发送验证码</button>
-        </div>
-        <label>新密码<input id="forgotNewPassword" type="password" placeholder="请输入新密码（至少6位）" required /></label>
-        <button class="primary full" type="submit">重置密码</button>
-      </form>
-      <div class="login-links">
-        <button id="backToLoginFromForgot" class="link-btn">返回登录</button>
-      </div>
-    </section>
   </main>
 
   <div id="appShell" class="app-shell hidden">
@@ -670,9 +652,9 @@
           
           <!-- 报告生成控制区 -->
           <div class="report-controls">
-            <div class="control-group">
+            <div id="reportReaderGroup" class="control-group staff-only">
               <label>选择读者
-                <select id="reportReader" class="admin-only"><option value="">请选择读者</option></select>
+                <select id="reportReader"><option value="">请选择读者</option></select>
               </label>
             </div>
             <div class="control-group">

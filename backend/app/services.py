@@ -197,8 +197,8 @@ class ReaderService:
         try:
             user_id = db_manager.execute(
                 """
-                INSERT INTO users(username, password_hash, role, full_name, phone, email, department, status)
-                VALUES (?, ?, 'reader', ?, ?, ?, ?, ?)
+                INSERT INTO users(username, password_hash, role, full_name, phone, email, department, status, created_at)
+                VALUES (?, ?, 'reader', ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                 """,
                 (data.username.strip(), hash_password(data.password), data.full_name.strip(), data.phone.strip(), data.email.strip(), data.department.strip(), data.status),
             )
@@ -844,7 +844,13 @@ class ReportService:
         where_sql = " WHERE " + " AND ".join(conditions)
         
         rows = db_manager.fetch_all(
-            f"SELECT * FROM v_borrow_detail{where_sql} ORDER BY borrow_date DESC",
+            f"""
+            SELECT v.*, b.author, b.category
+            FROM v_borrow_detail v
+            JOIN books b ON v.book_id = b.id
+            {where_sql}
+            ORDER BY borrow_date DESC
+            """,
             tuple(params),
         )
         
@@ -1197,7 +1203,7 @@ class RecommendationService:
             """,
             (reader_id, limit),
         )
-        return rows
+        return rows or self.recommend_by_popular(reader_id, limit)
 
     def recommend_by_department(self, reader_id: int, limit: int = 5) -> List[Dict[str, Any]]:
         """根据专业或院系推荐相关书籍"""
@@ -1206,7 +1212,7 @@ class RecommendationService:
         department = reader.get("department", "").strip()
         
         if not department:
-            return []
+            return self.recommend_by_category(reader_id, limit) or self.recommend_by_popular(reader_id, limit)
         
         # 推荐该部门其他读者借阅过的图书
         rows = db_manager.fetch_all(
@@ -1223,7 +1229,7 @@ class RecommendationService:
             """,
             (department, reader_id, limit),
         )
-        return rows
+        return rows or self.recommend_by_category(reader_id, limit) or self.recommend_by_popular(reader_id, limit)
 
     def get_all_recommendations(self, reader_id: int) -> Dict[str, List[Dict[str, Any]]]:
         """获取所有推荐"""

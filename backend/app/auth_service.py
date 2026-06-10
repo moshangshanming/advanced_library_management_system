@@ -84,12 +84,9 @@ class AuthService:
 
     def register(self, data: Dict) -> Dict:
         phone = data.get("phone", "").strip()
-        verify_code = data.get("verify_code", "").strip()
-
-        if not phone:
-            raise HTTPException(status_code=400, detail="注册需要绑定手机号码。")
-
-        self.verify_code(phone, verify_code, "register")
+        role = data.get("role", "reader")
+        if role not in {"reader", "admin"}:
+            raise HTTPException(status_code=400, detail="注册账号类型无效。")
 
         existing = db_manager.fetch_one(
             "SELECT COUNT(*) AS n FROM users WHERE username = ?", (data["username"].strip(),)
@@ -99,12 +96,13 @@ class AuthService:
 
         user_id = db_manager.execute(
             """
-            INSERT INTO users(username, password_hash, role, full_name, phone, email, department, status)
-            VALUES (?, ?, 'reader', ?, ?, ?, ?, 'active')
+            INSERT INTO users(username, password_hash, role, full_name, phone, email, department, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'active', datetime('now', 'localtime'))
             """,
             (
                 data["username"].strip(),
                 hash_password(data["password"]),
+                role,
                 data["full_name"].strip(),
                 phone,
                 data.get("email", "").strip(),

@@ -24,6 +24,20 @@ function toast(message, type = 'info') {
   setTimeout(() => el.classList.remove('show'), 2600);
 }
 
+function formatApiDetail(detail) {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(item => {
+      const field = Array.isArray(item.loc) ? item.loc.filter(x => x !== 'body').join('.') : '';
+      return `${field ? field + ': ' : ''}${item.msg || JSON.stringify(item)}`;
+    }).join('；');
+  }
+  if (detail && typeof detail === 'object') {
+    return detail.message || detail.msg || JSON.stringify(detail);
+  }
+  return '请求失败';
+}
+
 async function api(path, options = {}) {
   const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
@@ -32,7 +46,7 @@ async function api(path, options = {}) {
   const contentType = response.headers.get('content-type') || '';
   if (!response.ok) {
     let detail = '请求失败';
-    try { detail = (await response.json()).detail || detail; } catch (_) {}
+    try { detail = formatApiDetail((await response.json()).detail || detail); } catch (_) {}
     if (response.status === 401) logout(false);
     throw new Error(detail);
   }
@@ -311,10 +325,11 @@ function drawPie(canvasId, items) {
 
   // 根据可用宽度调整字体大小
   const fontSize = availableWidth < 150 ? 10 : 11;
-  const lineHeight = fontSize + 8;
+  const maxLegendHeight = height - 20;
+  const lineHeight = Math.max(12, Math.min(fontSize + 8, maxLegendHeight / Math.max(sortedItems.length, 1)));
   const boxSize = fontSize + 2;
 
-  const legendStartY = cy - (sortedItems.length * lineHeight) / 2;
+  const legendStartY = Math.max(10, cy - (sortedItems.length * lineHeight) / 2);
   ctx.font = `bold ${fontSize}px "Source Sans 3", sans-serif`;
 
   for (let i = 0; i < sortedItems.length; i++) {
@@ -637,9 +652,22 @@ async function showBookDetail(bookId) {
       $('detailCoverUpload').classList.add('hidden');
     }
 
-    // 根据库存设置借阅按钮状态
+    let alreadyBorrowed = false;
+    if (state.user.role === 'reader') {
+      alreadyBorrowed = await isCurrentReaderBorrowingBook(bookId);
+    }
+    state.currentDetailAlreadyBorrowed = alreadyBorrowed;
+
+    // 根据库存和当前借阅状态设置借阅按钮状态
     const borrowBtn = $('detailBorrowBtn');
-    if (book.available_count > 0) {
+    borrowBtn.classList.remove('borrowed-state');
+    if (alreadyBorrowed) {
+      borrowBtn.classList.remove('hidden');
+      borrowBtn.classList.add('disabled', 'borrowed-state');
+      borrowBtn.textContent = '已借阅';
+      borrowBtn.disabled = true;
+      $('detailReserveBtn').classList.add('hidden');
+    } else if (book.available_count > 0) {
       borrowBtn.classList.remove('hidden', 'disabled');
       borrowBtn.textContent = '借阅';
       borrowBtn.disabled = false;
@@ -677,6 +705,7 @@ function toggleDescription() {
 function closeBookDetailModal() {
   $('bookDetailModal').classList.add('hidden');
   state.currentDetailBookId = null;
+  state.currentDetailAlreadyBorrowed = false;
 }
 
 async function uploadDetailCover(input) {
@@ -707,14 +736,11 @@ async function uploadDetailCover(input) {
   input.value = '';
 }
 
-function quickBorrowFromDetail() {
+async function quickBorrowFromDetail() {
   if (!state.currentDetailBookId) return;
+  const bookId = state.currentDetailBookId;
   closeBookDetailModal();
-  switchView('records');
-  setTimeout(() => {
-    $('borrowBook').value = state.currentDetailBookId;
-    toast('已选择图书，请确认借阅信息');
-  }, 100);
+  await openBorrowFormModal(bookId);
 }
 
 async function reserveBookFromDetail() {
@@ -867,8 +893,7 @@ async function deleteBook(id) {
 }
 
 async function quickBorrow(bookId) {
-  switchView('records');
-  setTimeout(() => { $('borrowBook').value = bookId; toast('已选择图书，请确认借阅信息'); }, 100);
+  await openBorrowFormModal(bookId);
 }
 
 async function loadReaders() {
@@ -1075,7 +1100,7 @@ async function submitReaderForm() {
 }
 
 // ========== 借书登记弹窗控制 ==========
-function openBorrowFormModal() {
+async function openBorrowFormModal(bookId = null) {
   $('borrowOutDate').value = new Date().toISOString().split('T')[0];
   $('borrowDays').value = '30';
   $('borrowDueDate').value = '';
@@ -1083,10 +1108,14 @@ function openBorrowFormModal() {
   $('borrowRemark').value = '';
 
   // 加载图书和读者下拉框
-  loadBorrowOptions();
+  await loadBorrowOptions();
+  if (bookId) {
+    $('borrowBook').value = String(bookId);
+  }
   calculateDueDate();
 
   $('borrowFormModal').classList.remove('hidden');
+  toast('已选择图书，请确认借阅信息');
 }
 
 function closeBorrowFormModal() {
@@ -1111,7 +1140,7 @@ function calculateDueDate() {
 
 async function submitBorrowForm() {
   const bookId = $('borrowBook').value;
-  const readerId = $('borrowReader').value;
+  const readerId = state.user.role === 'reader' ? state.user.id : $('borrowReader').value;
   const outDate = $('borrowOutDate').value;
   const days = parseInt($('borrowDays').value);
   const dueDate = $('borrowDueDate').value;
@@ -1123,7 +1152,7 @@ async function submitBorrowForm() {
     toast('请选择借阅的图书', 'error');
     return;
   }
-  if (!readerId) {
+  if (state.user.role !== 'reader' && !readerId) {
     toast('请选择读者', 'error');
     return;
   }
@@ -1148,10 +1177,9 @@ async function submitBorrowForm() {
       method: 'POST',
       body: JSON.stringify({
         book_id: parseInt(bookId),
-        reader_id: parseInt(readerId),
-        borrow_date: outDate,
-        due_date: dueDate,
-        remark: fullRemark || null
+        reader_id: state.user.role === 'reader' ? undefined : parseInt(readerId),
+        days,
+        remark: fullRemark || ''
       })
     });
 
@@ -1159,7 +1187,9 @@ async function submitBorrowForm() {
     const bookSelect = $('borrowBook');
     const readerSelect = $('borrowReader');
     const bookTitle = bookSelect.options[bookSelect.selectedIndex]?.text.split('(')[0] || '图书';
-    const readerName = readerSelect.options[readerSelect.selectedIndex]?.text.split('(')[0] || '读者';
+    const readerName = state.user.role === 'reader'
+      ? state.user.full_name
+      : (readerSelect.options[readerSelect.selectedIndex]?.text.split('(')[0] || '读者');
 
     toast(`《${bookTitle}》已成功借给读者「${readerName}」，应还日期为 ${dueDate}`, 'success');
     closeBorrowFormModal();
@@ -1395,9 +1425,16 @@ async function deleteReader(id) {
 async function loadBorrowOptions() {
   const books = await api('/api/books?page=1&page_size=100');
   $('borrowBook').innerHTML = books.items.map(b => `<option value="${b.id}">${escapeHtml(b.title)}（可借 ${b.available_count}）</option>`).join('');
-  if (state.user.role === 'admin') {
+  const readerSelect = $('borrowReader');
+  const readerSection = readerSelect?.closest('.form-section');
+  if (state.user.role === 'reader') {
+    readerSelect.innerHTML = `<option value="${state.user.id}">${escapeHtml(state.user.full_name)} / ${escapeHtml(state.user.username)}</option>`;
+    readerSelect.value = String(state.user.id);
+    readerSection?.classList.add('hidden');
+  } else {
+    readerSection?.classList.remove('hidden');
     const readers = await api('/api/readers?page=1&page_size=100');
-    $('borrowReader').innerHTML = readers.items.map(r => `<option value="${r.id}">${escapeHtml(r.full_name)} / ${escapeHtml(r.username)}</option>`).join('');
+    readerSelect.innerHTML = readers.items.map(r => `<option value="${r.id}">${escapeHtml(r.full_name)} / ${escapeHtml(r.username)}</option>`).join('');
   }
 }
 
@@ -1596,10 +1633,34 @@ async function markAllMessagesRead() {
 
 async function loadReportView() {
   state.currentReport = null;
-  $('reportPreview').innerHTML = '<p>请点击"生成报告"查看当前读者的阅读汇总。</p>';
-  if (state.user.role === 'admin') {
+  $('reportPreview').innerHTML = `
+    <div class="report-empty-state">
+      <h4>暂无报告数据</h4>
+      <p>${state.user.role === 'reader' ? '点击「生成报告」查看您的读书报告' : '请选择读者并点击「生成报告」查看详细的读书报告'}</p>
+      <button id="quickGenerateReportBtn" class="primary">${state.user.role === 'reader' ? '生成我的报告' : '选择读者并生成报告'}</button>
+    </div>
+  `;
+  bindQuickGenerateReportButton();
+  if (state.user.role === 'reader') {
+    $('reportReader').innerHTML = `<option value="${state.user.id}">${escapeHtml(state.user.full_name)}（${escapeHtml(state.user.username)}）</option>`;
+    $('reportReader').value = String(state.user.id);
+  } else {
     await loadReportReaders();
   }
+  updateReportButtonStates();
+}
+
+function bindQuickGenerateReportButton() {
+  const quickBtn = $('quickGenerateReportBtn');
+  if (!quickBtn) return;
+  quickBtn.onclick = async function() {
+    if (state.user.role === 'reader') {
+      await generateReportWithLoading();
+      return;
+    }
+    $('reportReader').focus();
+    toast('请先选择读者，然后点击「生成报告」');
+  };
 }
 
 // 逾期相关函数
@@ -1843,23 +1904,28 @@ function renderRecommendation(containerId, items, reason) {
 
   if (!items || items.length === 0) {
     container.innerHTML = `
-      <div style="text-align: center; padding: 30px; color: #999;">
-        <div style="font-size: 32px; margin-bottom: 10px;">📚</div>
-        <p>暂无阅读数据，可先借阅图书获取个性化推荐</p>
-        <button class="primary" style="margin-top: 12px;" onclick="switchView('books')">浏览热门图书</button>
+      <div class="rec-empty">
+        <p>暂无可推荐书目</p>
+        <button class="primary small" onclick="switchView('books')">浏览图书</button>
       </div>
     `;
     return;
   }
 
   container.innerHTML = items.map(book => `
-    <div class="rec-item">
-      <strong>${escapeHtml(book.title)}</strong>
-      <div class="rec-author">${escapeHtml(book.author)} · ${escapeHtml(book.category)}</div>
-      <div style="color: #94a3b8; font-size: 12px;">ISBN: ${escapeHtml(book.isbn)}</div>
-      <div class="rec-reason">${reason}</div>
-      <div class="rec-actions">
-        <button class="primary small" onclick="borrowRecommendedBook(${book.id}, '${escapeHtml(book.title)}')">借阅</button>
+    <div class="rec-item" onclick="showBookDetail(${book.id})">
+      <div class="rec-cover">
+        <img src="${book.cover_image ? `/uploads/${book.cover_image}` : '/static/placeholder-cover.png'}" alt="${escapeHtml(book.title)}" />
+      </div>
+      <div class="rec-info">
+        <strong>${escapeHtml(book.title)}</strong>
+        <div class="rec-author">${escapeHtml(book.author || '未知作者')} · ${escapeHtml(book.category || '未分类')}</div>
+        <div class="rec-isbn">ISBN: ${escapeHtml(book.isbn || '-')}</div>
+        <div class="rec-reason">${reason}${book.avg_rating ? ` · 评分 ${Number(book.avg_rating).toFixed(1)}` : ''}${book.review_count ? ` · ${book.review_count} 条书评` : ''}</div>
+      </div>
+      <div class="rec-actions" onclick="event.stopPropagation()">
+        <button class="ghost small" onclick="showBookDetail(${book.id})">详情</button>
+        <button class="primary small" onclick="borrowRecommendedBook(${book.id})">借阅</button>
         <button class="ghost small" onclick="reserveRecommendedBook(${book.id}, '${escapeHtml(book.title)}')">预约</button>
       </div>
     </div>
@@ -1867,12 +1933,8 @@ function renderRecommendation(containerId, items, reason) {
 }
 
 // 借阅推荐图书
-async function borrowRecommendedBook(bookId, bookTitle) {
-  switchView('records');
-  setTimeout(() => {
-    $('borrowBook').value = bookId;
-    toast(`已选择《${bookTitle}》，请确认借阅信息`, 'success');
-  }, 100);
+async function borrowRecommendedBook(bookId) {
+  await openBorrowFormModal(bookId);
 }
 
 // 预约推荐图书
@@ -1890,6 +1952,11 @@ async function reserveRecommendedBook(bookId, bookTitle) {
 }
 
 async function loadReportReaders() {
+  if (state.user.role === 'reader') {
+    $('reportReader').innerHTML = `<option value="${state.user.id}">${escapeHtml(state.user.full_name)}（${escapeHtml(state.user.username)}）</option>`;
+    $('reportReader').value = String(state.user.id);
+    return;
+  }
   const data = await api('/api/readers?page=1&page_size=100');
   $('reportReader').innerHTML = '<option value="">请选择读者</option>' +
     data.items.map(r => `<option value="${r.id}">${escapeHtml(r.full_name)}（${escapeHtml(r.username)}${r.department ? '/' + escapeHtml(r.department) : ''}）</option>`).join('');
@@ -1943,13 +2010,7 @@ function initReportPageEvents() {
     });
 
     // 快捷生成报告按钮
-    const quickBtn = $('quickGenerateReportBtn');
-    if (quickBtn) {
-      quickBtn.addEventListener('click', function() {
-        $('reportReader').focus();
-        toast('请先选择读者，然后点击「生成报告」');
-      });
-    }
+    bindQuickGenerateReportButton();
 
     // 下载CSV按钮 - 使用onclick确保能捕获点击
     $('downloadReportCsvBtn').onclick = function(e) {
@@ -1998,7 +2059,7 @@ function initReportPageEvents() {
 
 // 更新按钮状态
 function updateReportButtonStates() {
-  const readerId = $('reportReader').value;
+  const readerId = state.user.role === 'reader' ? state.user.id : $('reportReader').value;
   const hasReport = state.currentReport !== null;
 
   // 生成报告按钮：未选择读者时置灰
@@ -2023,7 +2084,7 @@ function updateReportButtonStates() {
 
 // 带加载动画的报告生成
 async function generateReportWithLoading() {
-  const readerId = $('reportReader').value;
+  const readerId = state.user.role === 'reader' ? state.user.id : $('reportReader').value;
   if (!readerId) {
     toast('请先选择读者', 'error');
     return;
@@ -2038,7 +2099,10 @@ async function generateReportWithLoading() {
     btn.textContent = '生成中...';
 
     let url = '/api/reports/reader';
-    const params = [`reader_id=${readerId}`];
+    const params = [];
+    if (state.user.role !== 'reader') {
+      params.push(`reader_id=${readerId}`);
+    }
 
     // 添加时间范围参数
     const period = $('reportPeriod').value;
@@ -2065,7 +2129,9 @@ async function generateReportWithLoading() {
 
     // 获取读者姓名用于toast
     const readerSelect = $('reportReader');
-    const readerName = readerSelect.options[readerSelect.selectedIndex]?.text || '该读者';
+    const readerName = state.user.role === 'reader'
+      ? state.user.full_name
+      : (readerSelect.options[readerSelect.selectedIndex]?.text || '该读者');
 
     toast(`读者「${readerName}」的读书报告已生成，可在线预览或下载`, 'success');
   } catch (err) {
@@ -3214,79 +3280,34 @@ $('exportAuditBtn')?.addEventListener('click', exportAuditLogs);
 function showLoginPage() {
   $('loginCard').classList.remove('hidden');
   $('registerCard').classList.add('hidden');
-  $('forgotPasswordCard').classList.add('hidden');
 }
 
 function showRegisterPage() {
   $('loginCard').classList.add('hidden');
   $('registerCard').classList.remove('hidden');
-  $('forgotPasswordCard').classList.add('hidden');
 }
 
-function showForgotPasswordPage() {
-  $('loginCard').classList.add('hidden');
-  $('registerCard').classList.add('hidden');
-  $('forgotPasswordCard').classList.remove('hidden');
-}
-
-function startCodeTimer(btnId, seconds = 60) {
-  const btn = $(btnId);
-  let count = seconds;
-  btn.disabled = true;
-  btn.textContent = `${count}秒后重发`;
-  const timer = setInterval(() => {
-    count--;
-    if (count <= 0) {
-      clearInterval(timer);
-      btn.disabled = false;
-      btn.textContent = '发送验证码';
-    } else {
-      btn.textContent = `${count}秒后重发`;
-    }
-  }, 1000);
-}
-
-async function sendRegisterCode() {
-  const phone = $('registerPhone').value.trim();
-  if (!phone) return toast('请输入手机号', 'error');
-
+async function isCurrentReaderBorrowingBook(bookId) {
+  if (state.user.role !== 'reader') return false;
   try {
-    await api('/api/auth/send-code', {
-      method: 'POST',
-      body: JSON.stringify({ phone })
-    });
-    toast('验证码已发送', 'success');
-    startCodeTimer('sendRegisterCodeBtn');
+    const data = await api('/api/borrow-records?page=1&page_size=100');
+    return (data.items || []).some(record =>
+      Number(record.book_id) === Number(bookId) && ['borrowed', 'overdue'].includes(record.status)
+    );
   } catch (e) {
-    toast(e.message, 'error');
-  }
-}
-
-async function sendForgotCode() {
-  const phone = $('forgotPhone').value.trim();
-  if (!phone) return toast('请输入手机号', 'error');
-
-  try {
-    await api('/api/auth/send-forgot-code', {
-      method: 'POST',
-      body: JSON.stringify({ phone })
-    });
-    toast('验证码已发送', 'success');
-    startCodeTimer('sendForgotCodeBtn');
-  } catch (e) {
-    toast(e.message, 'error');
+    console.warn('检查借阅状态失败:', e);
+    return false;
   }
 }
 
 async function handleRegister(e) {
   e.preventDefault();
+  const role = $('registerRole').value;
   const username = $('registerUsername').value;
   const full_name = $('registerFullName').value;
-  const phone = $('registerPhone').value;
-  const code = $('registerCode').value;
   const password = $('registerPassword').value;
 
-  if (!username || !full_name || !phone || !code || !password) {
+  if (!username || !full_name || !password) {
     return toast('请填写完整信息', 'error');
   }
   if (password.length < 6) {
@@ -3296,34 +3317,9 @@ async function handleRegister(e) {
   try {
     await api('/api/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ username, full_name, phone, verify_code: code, password })
+      body: JSON.stringify({ role, username, full_name, password })
     });
-    toast('注册成功，请登录', 'success');
-    showLoginPage();
-  } catch (e) {
-    toast(e.message, 'error');
-  }
-}
-
-async function handleForgotPassword(e) {
-  e.preventDefault();
-  const phone = $('forgotPhone').value;
-  const code = $('forgotCode').value;
-  const newPassword = $('forgotNewPassword').value;
-
-  if (!phone || !code || !newPassword) {
-    return toast('请填写完整信息', 'error');
-  }
-  if (newPassword.length < 6) {
-    return toast('密码至少6位', 'error');
-  }
-
-  try {
-    await api('/api/auth/forgot-password', {
-      method: 'POST',
-      body: JSON.stringify({ phone, verify_code: code, new_password: newPassword })
-    });
-    toast('密码重置成功，请登录', 'success');
+    toast(`${role === 'admin' ? '管理员' : '用户'}注册成功，请登录`, 'success');
     showLoginPage();
   } catch (e) {
     toast(e.message, 'error');
@@ -3370,13 +3366,8 @@ async function confirmChangePassword() {
 
 // 登录注册事件绑定
 $('registerLink').addEventListener('click', showRegisterPage);
-$('forgotPasswordLink').addEventListener('click', showForgotPasswordPage);
 $('backToLoginFromRegister').addEventListener('click', showLoginPage);
-$('backToLoginFromForgot').addEventListener('click', showLoginPage);
-$('sendRegisterCodeBtn')?.addEventListener('click', sendRegisterCode);
-$('sendForgotCodeBtn')?.addEventListener('click', sendForgotCode);
 $('registerForm').addEventListener('submit', handleRegister);
-$('forgotPasswordForm').addEventListener('submit', handleForgotPassword);
 $('changePasswordBtn').addEventListener('click', showChangePasswordModal);
 
 // 时间筛选器事件绑定
@@ -3540,7 +3531,7 @@ $('readerFormModal')?.addEventListener('click', function(e) {
 });
 
 // ========== 借书登记弹窗控制 ==========
-function openBorrowFormModal() {
+async function openBorrowFormModal(bookId = null) {
   $('borrowOutDate').value = new Date().toISOString().split('T')[0];
   $('borrowDays').value = '30';
   $('borrowDueDate').value = '';
@@ -3548,10 +3539,14 @@ function openBorrowFormModal() {
   $('borrowRemark').value = '';
 
   // 加载图书和读者下拉框
-  loadBorrowOptions();
+  await loadBorrowOptions();
+  if (bookId) {
+    $('borrowBook').value = String(bookId);
+  }
   calculateDueDate();
 
   $('borrowFormModal').classList.remove('hidden');
+  toast('已选择图书，请确认借阅信息');
 }
 
 function closeBorrowFormModal() {
@@ -3576,7 +3571,7 @@ function calculateDueDate() {
 
 async function submitBorrowForm() {
   const bookId = $('borrowBook').value;
-  const readerId = $('borrowReader').value;
+  const readerId = state.user.role === 'reader' ? state.user.id : $('borrowReader').value;
   const outDate = $('borrowOutDate').value;
   const days = parseInt($('borrowDays').value);
   const dueDate = $('borrowDueDate').value;
@@ -3588,7 +3583,7 @@ async function submitBorrowForm() {
     toast('请选择借阅的图书', 'error');
     return;
   }
-  if (!readerId) {
+  if (state.user.role !== 'reader' && !readerId) {
     toast('请选择读者', 'error');
     return;
   }
@@ -3613,10 +3608,9 @@ async function submitBorrowForm() {
       method: 'POST',
       body: JSON.stringify({
         book_id: parseInt(bookId),
-        reader_id: parseInt(readerId),
-        borrow_date: outDate,
-        due_date: dueDate,
-        remark: fullRemark || null
+        reader_id: state.user.role === 'reader' ? undefined : parseInt(readerId),
+        days,
+        remark: fullRemark || ''
       })
     });
 
@@ -3624,7 +3618,9 @@ async function submitBorrowForm() {
     const bookSelect = $('borrowBook');
     const readerSelect = $('borrowReader');
     const bookTitle = bookSelect.options[bookSelect.selectedIndex]?.text.split('(')[0] || '图书';
-    const readerName = readerSelect.options[readerSelect.selectedIndex]?.text.split('(')[0] || '读者';
+    const readerName = state.user.role === 'reader'
+      ? state.user.full_name
+      : (readerSelect.options[readerSelect.selectedIndex]?.text.split('(')[0] || '读者');
 
     toast(`《${bookTitle}》已成功借给读者「${readerName}」，应还日期为 ${dueDate}`, 'success');
     closeBorrowFormModal();

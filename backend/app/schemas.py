@@ -12,10 +12,11 @@ class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=6, max_length=100)
     full_name: str = Field(..., min_length=1, max_length=80)
-    phone: str = Field(..., min_length=11, max_length=15)
+    role: str = Field(default="reader", pattern="^(reader|admin)$")
+    phone: str = Field(default="", max_length=15)
     email: str = Field(default="", max_length=80)
     department: str = Field(default="", max_length=80)
-    verify_code: str = Field(..., min_length=6, max_length=6)
+    verify_code: str = Field(default="", max_length=6)
 
 
 class VerifyCodeRequest(BaseModel):
@@ -89,6 +90,8 @@ class ReaderReportItem(BaseModel):
     id: int
     book_title: str
     isbn: str
+    author: str = ""
+    category: str = ""
     borrow_date: str
     due_date: str
     return_date: Optional[str]
