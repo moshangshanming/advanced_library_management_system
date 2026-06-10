@@ -208,7 +208,7 @@ tr:hover td { background: rgba(255, 255, 255, 0.4); }
 .row-actions button { padding: 6px 12px; font-size: 12px; border-radius: 10px; }
 
 /* 报告预览区 */
-.report-preview { 
+.report-preview {
   padding: 0;
   background: transparent;
   border-radius: 0;
@@ -303,17 +303,17 @@ tr:hover td { background: rgba(255, 255, 255, 0.4); }
     flex-direction: column;
     align-items: stretch;
   }
-  
+
   .control-group {
     width: 100%;
   }
-  
+
   .control-actions {
     margin-left: 0;
     justify-content: center;
     flex-wrap: wrap;
   }
-  
+
   .control-actions button {
     flex: 1;
     min-width: 120px;
@@ -839,6 +839,32 @@ button.loading {
   padding: 20px 24px;
   border-top: 1px solid rgba(0, 0, 0, 0.08);
   background: rgba(248, 250, 252, 1);
+}
+
+/* 公告详情弹窗样式 */
+.detail-row {
+  display: flex;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.detail-row:last-child {
+  margin-bottom: 0;
+}
+
+.detail-label {
+  flex-shrink: 0;
+  width: 80px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.detail-content {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  color: #1e293b;
 }
 
 .detail-table {
@@ -1412,6 +1438,17 @@ textarea:focus {
   gap: 12px;
   align-items: center;
   margin-bottom: 24px;
+  justify-content: space-between;
+}
+.toolbar-left {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.toolbar-right {
+  display: flex;
+  gap: 12px;
+  align-items: center;
 }
 .toolbar .input,
 .toolbar select,
@@ -1696,6 +1733,411 @@ tr:hover td {
   margin-bottom: 24px;
 }
 
+/* ========== 逾期提醒页面样式 ========== */
+
+/* 统计卡片网格 - 4列均匀排列 */
+.overdue-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+/* 统计卡片 - 系统 bento 卡片风格 */
+.overdue-stat-card {
+  background: white;
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  text-align: center;
+  border: 1px solid rgba(255,255,255,0.6);
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+.overdue-stat-value {
+  display: block;
+  font-size: 30px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  line-height: 1.2;
+}
+
+.overdue-stat-label {
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+/* 统计卡片颜色变体 */
+.overdue-stat-total {
+  background: rgba(255,255,255,0.7);
+  border-color: rgba(255,255,255,0.5);
+}
+.overdue-stat-total .overdue-stat-value { color: #334155; }
+
+.overdue-stat-warning {
+  background: rgba(254,252,232,0.8);
+  border-color: rgba(253,224,71,0.5);
+}
+.overdue-stat-warning .overdue-stat-value { color: #ca8a04; }
+
+.overdue-stat-danger {
+  background: rgba(254,242,242,0.8);
+  border-color: rgba(252,165,165,0.5);
+}
+.overdue-stat-danger .overdue-stat-value { color: #dc2626; }
+
+.overdue-stat-info {
+  background: rgba(239,246,255,0.8);
+  border-color: rgba(147,197,253,0.5);
+}
+.overdue-stat-info .overdue-stat-value { color: #2563eb; }
+
+/* 逾期提醒中心面板 */
+.overdue-panel {
+  background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.5);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+}
+
+/* 搜索排序行 */
+.overdue-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.overdue-search-input {
+  flex: 1;
+  padding: 8px 14px;
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: var(--radius);
+  font-size: 14px;
+  background: rgba(255,255,255,0.7);
+  backdrop-filter: blur(10px);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.overdue-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(184, 134, 11, 0.15);
+  background: white;
+}
+
+.overdue-sort-select {
+  padding: 8px 32px 8px 14px;
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: var(--radius);
+  font-size: 14px;
+  background: rgba(255,255,255,0.7) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
+  appearance: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  min-width: 140px;
+}
+
+.overdue-sort-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  background-color: white;
+}
+
+/* 操作按钮行 */
+.overdue-action-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+/* 逾期页面按钮：使用系统 primary/ghost 样式 */
+#refreshOverdueBtn,
+#generateRemindersBtn,
+#batchNotifyBtn {
+  background: var(--accent) !important;
+  color: white !important;
+  border: none !important;
+  padding: 8px 18px !important;
+  border-radius: var(--radius) !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 4px rgba(184,134,11,0.2);
+}
+
+#refreshOverdueBtn:hover:not(:disabled),
+#generateRemindersBtn:hover:not(:disabled),
+#batchNotifyBtn:hover:not(:disabled) {
+  background: var(--accent-secondary) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(184,134,11,0.3) !important;
+}
+
+#refreshOverdueBtn:disabled,
+#generateRemindersBtn:disabled,
+#batchNotifyBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+#exportOverdueBtn {
+  background: rgba(255,255,255,0.7) !important;
+  color: var(--foreground) !important;
+  border: 1px solid rgba(255,255,255,0.5) !important;
+  padding: 8px 18px !important;
+  border-radius: var(--radius) !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#exportOverdueBtn:hover:not(:disabled) {
+  background: white !important;
+  border-color: #cbd5e1 !important;
+  transform: translateY(-1px);
+}
+
+#exportOverdueBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* 按钮加载动画 */
+.btn-loading {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.35);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: btn-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+#exportOverdueBtn .btn-loading {
+  border-color: rgba(0,0,0,0.2);
+  border-top-color: #64748b;
+}
+
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 逾期提醒消息列表 */
+.reminder-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.5);
+}
+
+.reminder-message {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.5);
+}
+
+.reminder-message:last-child {
+  border-bottom: none;
+}
+
+.reminder-message-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 4px;
+}
+
+.reminder-message-body {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+
+.reminder-message-time {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* 逾期记录表格 */
+#overdueTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#overdueTable th {
+  background: rgba(248,250,252,0.8);
+  padding: 11px 14px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 13px;
+  color: #475569;
+  border-bottom: 2px solid rgba(226,232,240,0.7);
+  white-space: nowrap;
+}
+
+#overdueTable td {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(241,245,249,0.7);
+  font-size: 13px;
+  color: #334155;
+}
+
+#overdueTable tr:last-child td {
+  border-bottom: none;
+}
+
+#overdueTable tr:hover td {
+  background: rgba(248,250,252,0.5);
+}
+
+/* 复选框 */
+.overdue-checkbox {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+/* 状态标签 - 系统 badge 样式 */
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.badge.borrowed {
+  background: rgba(219,234,254,0.8);
+  color: #2563eb;
+}
+
+.badge.overdue {
+  background: rgba(254,226,226,0.9);
+  color: #dc2626;
+}
+
+.badge.returned {
+  background: rgba(241,245,249,0.8);
+  color: #64748b;
+}
+
+/* 逾期天数/罚金颜色 */
+.text-danger { color: #dc2626; font-weight: 600; }
+.text-warning { color: #d97706; font-weight: 600; }
+
+/* 表格操作按钮 */
+#overdueTable .action-btn {
+  padding: 5px 11px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  margin-right: 5px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+#overdueTable .action-btn.notify {
+  background: rgba(254,243,199,0.9);
+  color: #92400e;
+  border: 1px solid rgba(252,211,77,0.7);
+}
+
+#overdueTable .action-btn.notify:hover:not(:disabled) {
+  background: #fde68a;
+  transform: translateY(-1px);
+}
+
+#overdueTable .action-btn.notify:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: rgba(241,245,249,0.7);
+  border-color: rgba(226,232,240,0.6);
+  color: #94a3b8;
+  transform: none;
+}
+
+#overdueTable .action-btn.detail {
+  background: rgba(255,255,255,0.8);
+  color: #475569;
+  border: 1px solid rgba(203,213,225,0.7);
+}
+
+#overdueTable .action-btn.detail:hover {
+  background: white;
+  border-color: #94a3b8;
+  transform: translateY(-1px);
+}
+
+/* 分页控件 - 使用系统 pager 样式 */
+.pager {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(241,245,249,0.7);
+}
+
+.pagination-btn {
+  padding: 6px 18px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.5);
+  background: rgba(255,255,255,0.7);
+  color: #475569;
+  transition: all 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.pagination-btn:hover:not(:disabled) {
+  background: white;
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+}
+
+.pagination-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+#overduePageText {
+  font-size: 13px;
+  color: #64748b;
+  min-width: 90px;
+  text-align: center;
+}
+
 /* Toast */
 .toast {
   position: fixed;
@@ -1721,6 +2163,10 @@ tr:hover td {
 }
 .toast.error {
   background: #B00020;
+  color: white;
+}
+.toast.warning {
+  background: #f59e0b;
   color: white;
 }
 .toast.info {
@@ -1766,17 +2212,15 @@ tr:hover td {
     width: 100%;
   }
 }
-/* ========== 1. 强制所有主要按钮显示为金色 ========== */
+/* ========== 1. 强制所有主要按钮显示为金色（排除逾期页面自定义按钮） ========== */
 #bookSearchBtn,
 #readerSearchBtn,
 #recordSearchBtn,
-button.primary,
+button.primary:not(.overdue-btn),
 .btn-primary,
 #bookForm button[type="submit"],
 #readerForm button[type="submit"],
-#borrowForm button[type="submit"],
-#refreshOverdueBtn,
-#generateRemindersBtn {
+#borrowForm button[type="submit"] {
   background: var(--accent) !important;
   color: var(--accent-foreground) !important;
   border-color: var(--accent) !important;
@@ -1785,13 +2229,11 @@ button.primary,
   box-shadow: 0 2px 4px rgba(184, 134, 11, 0.2) !important;
 }
 #bookSearchBtn:hover,
-button.primary:hover,
+button.primary:not(.overdue-btn):hover,
 .btn-primary:hover,
 #bookForm button[type="submit"]:hover,
 #readerForm button[type="submit"]:hover,
-#borrowForm button[type="submit"]:hover,
-#refreshOverdueBtn:hover,
-#generateRemindersBtn:hover {
+#borrowForm button[type="submit"]:hover {
   background: var(--accent-secondary) !important;
   transform: translateY(-2px);
   box-shadow: 0 4px 8px rgba(184, 134, 11, 0.3) !important;
@@ -2189,49 +2631,12 @@ th:last-child {
   .book-detail-body {
     flex-direction: column;
   }
-  
+
   .book-detail-cover {
     width: 100%;
     max-width: 200px;
     margin: 0 auto;
   }
-}
-
-/* 逾期提醒页面按钮样式 */
-#overdueTable button.btn.small.primary,
-#overdueTable button.primary {
-  background: var(--accent);
-  color: white;
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
-  display: inline-block;
-  font-weight: 500;
-  box-shadow: 0 2px 4px rgba(184, 134, 11, 0.2);
-}
-
-#overdueTable button.btn.small.primary:hover,
-#overdueTable button.primary:hover {
-  background: var(--accent-secondary);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(184, 134, 11, 0.3);
-}
-
-#overdueTable button.btn.small.ghost,
-#overdueTable button.ghost {
-  background: var(--card);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-  cursor: pointer;
-  display: inline-block;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-}
-
-#overdueTable button.btn.small.ghost:hover,
-#overdueTable button.ghost:hover {
-  background: white;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
 /* 表格操作列样式 */

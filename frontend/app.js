@@ -1,5 +1,5 @@
 console.log('app.js loaded');
-const API_BASE_URL = 'http://localhost:8000'; // 后端 API 基础地址
+const API_BASE_URL = window.location.origin; // 动态获取当前页面地址，避免 localhost/127.0.0.1 不一致问题
 const state = {
   token: localStorage.getItem('library_token') || '',
   user: null,
@@ -109,9 +109,9 @@ function switchView(viewName) {
   if (viewName === 'readers') loadReaders();
   if (viewName === 'records') { loadBorrowOptions(); loadRecords(); }
   if (viewName === 'reservations') loadReservations();
-  if (viewName === 'reports') { 
-    loadReportView(); 
-    loadRecommendations(); 
+  if (viewName === 'reports') {
+    loadReportView();
+    loadRecommendations();
     // 初始化报告页面事件监听
     initReportPageEvents();
   }
@@ -125,22 +125,22 @@ async function loadDashboard() {
   $('categoryChartLoading').classList.remove('hidden');
   $('trendChartLoading').classList.remove('hidden');
   $('trendEmptyMessage').classList.add('hidden');
-  
+
   try {
     const [overview, category, trend, topBooks] = await Promise.all([
-      api('/api/stats/overview'), 
-      api('/api/stats/category'), 
-      api(`/api/stats/borrow-trend?days=${state.dashboardTimeRange}`), 
+      api('/api/stats/overview'),
+      api('/api/stats/category'),
+      api(`/api/stats/borrow-trend?days=${state.dashboardTimeRange}`),
       api('/api/stats/top-books')
     ]);
-    
+
     // 渲染数据卡片（带点击跳转和辅助信息）
     renderMetricCards(overview);
-    
+
     // 绘制图表
     drawPie('categoryChart', category.items);
     $('categoryChartLoading').classList.add('hidden');
-    
+
     // 处理趋势图
     if (trend.items && trend.items.length > 0) {
       drawBar('trendChart', trend.items);
@@ -156,10 +156,10 @@ async function loadDashboard() {
       $('trendEmptyMessage').classList.remove('hidden');
     }
     $('trendChartLoading').classList.add('hidden');
-    
+
     // 更新趋势图标题
     $('trendPeriodText').textContent = `近 ${state.dashboardTimeRange} 天`;
-    
+
     // 热门图书
     $('topBooks').innerHTML = topBooks.items.length ? topBooks.items.map((item, idx) => `
       <div class="top-item" onclick="showBookDetail(${item.id})" style="cursor: pointer;">
@@ -217,7 +217,7 @@ function renderMetricCards(overview) {
       view: 'records'
     }
   ];
-  
+
   $('metricGrid').innerHTML = cards.map((card, index) => `
     <div class="metric-card ${card.isWarning ? 'overdue-warning' : ''}" data-view="${card.view}" data-index="${index}">
       <span>${card.label}</span>
@@ -225,7 +225,7 @@ function renderMetricCards(overview) {
       ${card.subtitle ? `<span class="metric-subtitle">${card.subtitle}</span>` : ''}
     </div>
   `).join('');
-  
+
   // 添加点击事件
   document.querySelectorAll('.metric-card').forEach((card, index) => {
     card.addEventListener('click', function() {
@@ -265,12 +265,12 @@ function drawPie(canvasId, items) {
   // 根据图例数量动态调整饼图位置
   const maxLegendWidth = Math.max(...sortedItems.map(item => item.name.length)) * 8 + 60;
   const hasEnoughSpace = width - (110 + 70 + 15) > maxLegendWidth;
-  
+
   // 如果空间不足，缩小饼图并左移
   const cx = hasEnoughSpace ? 110 : 90;
   const cy = height / 2;
   const r = hasEnoughSpace ? 70 : 60;
-  
+
   let start = -Math.PI / 2;
   for (let i = 0; i < sortedItems.length; i++) {
     const angle = (Number(sortedItems[i].value) / total) * Math.PI * 2;
@@ -299,26 +299,26 @@ function drawPie(canvasId, items) {
   // 右侧图例 - 优化布局和字体大小
   const legendX = cx + r + 15;
   const availableWidth = width - legendX - 10;
-  
+
   // 根据可用宽度调整字体大小
   const fontSize = availableWidth < 150 ? 10 : 11;
   const lineHeight = fontSize + 8;
   const boxSize = fontSize + 2;
-  
+
   const legendStartY = cy - (sortedItems.length * lineHeight) / 2;
   ctx.font = `bold ${fontSize}px "Source Sans 3", sans-serif`;
-  
+
   for (let i = 0; i < sortedItems.length; i++) {
     const item = sortedItems[i];
     const y = legendStartY + i * lineHeight;
-    
+
     // 绘制颜色框
     ctx.fillStyle = colors[i];
     ctx.fillRect(legendX, y, boxSize, boxSize);
     ctx.strokeStyle = '#FFFFFF';
     ctx.lineWidth = 1;
     ctx.strokeRect(legendX, y, boxSize, boxSize);
-    
+
     // 绘制文字 - 如果太长则截断
     let labelText = `${item.name}: ${item.value}`;
     const textWidth = ctx.measureText(labelText).width;
@@ -328,7 +328,7 @@ function drawPie(canvasId, items) {
       const shortName = item.name.length > maxNameLength ? item.name.substring(0, maxNameLength) + '...' : item.name;
       labelText = `${shortName}: ${item.value}`;
     }
-    
+
     ctx.fillStyle = '#333333';
     ctx.fillText(labelText, legendX + boxSize + 6, y + fontSize);
   }
@@ -379,10 +379,10 @@ function drawBar(canvasId, items) {
   ctx.setLineDash([]);
 
   let maxCount = -Infinity, maxIndex = -1;
-  
+
   // 计算日期标签的显示间隔，避免过于密集
   const labelInterval = items.length > 14 ? 3 : items.length > 7 ? 2 : 1;
-  
+
   for (let i = 0; i < items.length; i++) {
     const count = Number(items[i].count);
     if (count > maxCount) { maxCount = count; maxIndex = i; }
@@ -432,10 +432,10 @@ async function loadBooks() {
   $('bookPageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
   $('categoryFilter').innerHTML = '<option value="">全部分类</option>' + data.categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
   $('categoryFilter').value = decodeURIComponent(category);
-  
+
   // 加载下拉选项（分类、出版社、书架）
   await loadDropdownOptions();
-  
+
   // 卡片式展示
   $('bookGrid').innerHTML = data.items.length ? data.items.map(book => `
     <div class="book-card" onclick="showBookDetail(${book.id})" style="cursor: pointer;">
@@ -468,34 +468,34 @@ async function loadDropdownOptions() {
     // 从后端获取统计数据以获取分类列表
     const categoryData = await api('/api/stats/category');
     const categories = categoryData.items.map(item => item.name);
-    
+
     // 从图书列表中获取唯一的出版社和书架位置
     const publishers = [...new Set(state.lastBooks.map(b => b.publisher).filter(p => p))];
     const shelves = [...new Set(state.lastBooks.map(b => b.shelf_location).filter(s => s))];
-    
+
     // 填充分类下拉框
     const categorySelect = $('bookCategory');
     if (categorySelect) {
       const currentValue = categorySelect.value;
-      categorySelect.innerHTML = '<option value="">请选择分类</option>' + 
+      categorySelect.innerHTML = '<option value="">请选择分类</option>' +
         categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
       categorySelect.value = currentValue;
     }
-    
+
     // 填充出版社下拉框
     const publisherSelect = $('bookPublisher');
     if (publisherSelect) {
       const currentValue = publisherSelect.value;
-      publisherSelect.innerHTML = '<option value="">请选择或输入</option>' + 
+      publisherSelect.innerHTML = '<option value="">请选择或输入</option>' +
         publishers.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
       publisherSelect.value = currentValue;
     }
-    
+
     // 填充书架位置下拉框
     const shelfSelect = $('bookShelf');
     if (shelfSelect) {
       const currentValue = shelfSelect.value;
-      shelfSelect.innerHTML = '<option value="">请选择书架</option>' + 
+      shelfSelect.innerHTML = '<option value="">请选择书架</option>' +
         shelves.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
       shelfSelect.value = currentValue;
     }
@@ -515,10 +515,10 @@ function clearSelect(selectId) {
 async function uploadCover(bookId, input) {
   const file = input.files[0];
   if (!file) return;
-  
+
   const formData = new FormData();
   formData.append('file', file);
-  
+
   try {
     const result = await fetch(`/api/books/${bookId}/cover`, {
       method: 'POST',
@@ -542,10 +542,10 @@ async function uploadCover(bookId, input) {
 async function importBooks() {
   const file = $('importBooksFile').files[0];
   if (!file) return;
-  
+
   const formData = new FormData();
   formData.append('file', file);
-  
+
   try {
     const result = await fetch('/api/books/import', {
       method: 'POST',
@@ -587,18 +587,18 @@ async function showBookDetail(bookId) {
     $('detailPrice').textContent = (book.price || 0).toFixed(2);
     $('detailDescription').textContent = book.description || '暂无简介';
     $('detailCover').src = book.cover_image ? `/uploads/${book.cover_image}` : '/static/placeholder-cover.png';
-    
+
     // 获取借阅次数
     const borrowData = await api(`/api/books/${bookId}/borrow-count`);
     $('detailBorrowCount').textContent = borrowData.count;
-    
+
     // 显示/隐藏封面上传按钮
     if (state.user.role === 'admin' || state.user.role === 'librarian') {
       $('detailCoverUpload').classList.remove('hidden');
     } else {
       $('detailCoverUpload').classList.add('hidden');
     }
-    
+
     // 根据库存显示借阅或预约按钮
     if (book.available_count > 0) {
       $('detailBorrowBtn').classList.remove('hidden');
@@ -607,10 +607,10 @@ async function showBookDetail(bookId) {
       $('detailBorrowBtn').classList.add('hidden');
       $('detailReserveBtn').classList.remove('hidden');
     }
-    
+
     // 保存当前书籍ID用于借阅/预约
     state.currentDetailBookId = bookId;
-    
+
     $('bookDetailModal').classList.remove('hidden');
   } catch (e) {
     toast('加载图书详情失败: ' + e.message, 'error');
@@ -625,10 +625,10 @@ function closeBookDetailModal() {
 async function uploadDetailCover(input) {
   const file = input.files[0];
   if (!file || !state.currentDetailBookId) return;
-  
+
   const formData = new FormData();
   formData.append('file', file);
-  
+
   try {
     const result = await fetch(`/api/books/${state.currentDetailBookId}/cover`, {
       method: 'POST',
@@ -654,9 +654,9 @@ function quickBorrowFromDetail() {
   if (!state.currentDetailBookId) return;
   closeBookDetailModal();
   switchView('records');
-  setTimeout(() => { 
-    $('borrowBook').value = state.currentDetailBookId; 
-    toast('已选择图书，请确认借阅信息'); 
+  setTimeout(() => {
+    $('borrowBook').value = state.currentDetailBookId;
+    toast('已选择图书，请确认借阅信息');
   }, 100);
 }
 
@@ -675,7 +675,7 @@ async function reserveBookFromDetail() {
 function editBook(id) {
   const book = state.lastBooks.find(x => x.id === id);
   if (!book) return;
-  
+
   // 打开弹窗并填充数据
   openBookFormModal(book);
 }
@@ -683,7 +683,7 @@ function editBook(id) {
 // 打开图书表单弹窗
 function openBookFormModal(book = null) {
   $('bookFormModal').classList.remove('hidden');
-  
+
   if (book) {
     // 编辑模式
     $('bookFormTitle').textContent = `编辑图书 #${book.id}`;
@@ -744,25 +744,25 @@ async function submitBookForm() {
   const price = parseFloat($('bookPrice').value) || 0;
   const shelf_location = $('bookShelfCustom').value.trim() || $('bookShelf').value;
   const description = $('bookDescription').value.trim();
-  
+
   // 基本校验
   if (!isbn || !title || !author || !category || !total_count) {
     toast('请填写所有必填项', 'error');
     return;
   }
-  
+
   // ISBN校验
   if (!validateISBN(isbn)) {
     toast('请输入10或13位有效ISBN', 'error');
     return;
   }
-  
+
   // 库存校验
   if (!validateStock()) {
     toast('库存数量设置不正确', 'error');
     return;
   }
-  
+
   const payload = {
     isbn,
     title,
@@ -775,7 +775,7 @@ async function submitBookForm() {
     shelf_location,
     description
   };
-  
+
   try {
     if (bookId) {
       // 编辑
@@ -847,13 +847,13 @@ async function confirmPasswordReset() {
     toast('密码至少需要6位', 'error');
     return;
   }
-  
+
   if (!pendingResetReaderId) return;
-  
+
   try {
-    await api(`/api/readers/${pendingResetReaderId}/reset-password`, { 
-      method: 'POST', 
-      body: JSON.stringify({ new_password: newPassword }) 
+    await api(`/api/readers/${pendingResetReaderId}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ new_password: newPassword })
     });
     toast('密码重置成功', 'success');
     closePasswordModal();
@@ -874,10 +874,10 @@ async function exportReaders() {
 async function handleImportReaders(event) {
   const file = event.target.files[0];
   if (!file) return;
-  
+
   const formData = new FormData();
   formData.append('file', file);
-  
+
   try {
     const response = await fetch('/api/readers/import', {
       method: 'POST',
@@ -885,11 +885,11 @@ async function handleImportReaders(event) {
       body: formData
     });
     const result = await response.json();
-    
+
     if (!response.ok) {
       throw new Error(result.detail || '导入失败');
     }
-    
+
     const resultDiv = $('importResult');
     resultDiv.classList.remove('hidden');
     resultDiv.innerHTML = `
@@ -898,13 +898,13 @@ async function handleImportReaders(event) {
         ${result.errors.length > 0 ? `<br><strong>错误详情：</strong>${result.errors.map(e => `行 ${e.row}: ${e.error}`).join('<br>')}` : ''}
       </div>
     `;
-    
+
     loadReaders();
     toast(`成功导入 ${result.success} 位读者`, 'success');
   } catch (e) {
     toast(e.message, 'error');
   }
-  
+
   event.target.value = '';
 }
 
@@ -921,13 +921,13 @@ function openReaderFormModal(reader = null) {
   $('readerDepartment').value = reader ? reader.department || '' : '';
   $('readerDepartmentCustom').value = '';
   $('readerStatus').value = reader ? reader.status : 'active';
-  
+
   // 清空验证错误
   document.querySelectorAll('#readerFormModal .validation-error').forEach(el => {
     el.textContent = '';
     el.style.display = 'none';
   });
-  
+
   $('readerFormModal').classList.remove('hidden');
 }
 
@@ -945,7 +945,7 @@ async function submitReaderForm() {
   const email = $('readerEmail').value;
   const department = $('readerDepartment').value || $('readerDepartmentCustom').value;
   const status = $('readerStatus').value;
-  
+
   // 表单校验
   if (!username) {
     toast('请输入用户名', 'error');
@@ -979,7 +979,7 @@ async function submitReaderForm() {
     toast('请输入有效的邮箱地址', 'error');
     return;
   }
-  
+
   try {
     const payload = {
       username,
@@ -989,7 +989,7 @@ async function submitReaderForm() {
       department: department || null,
       status
     };
-    
+
     if (id) {
       // 编辑读者
       if (password) {
@@ -1009,7 +1009,7 @@ async function submitReaderForm() {
       });
       toast(`读者「${fullName}」新增成功`, 'success');
     }
-    
+
     closeReaderFormModal();
     loadReaders();
   } catch (e) {
@@ -1024,11 +1024,11 @@ function openBorrowFormModal() {
   $('borrowDueDate').value = '';
   $('borrowRemarkType').value = '';
   $('borrowRemark').value = '';
-  
+
   // 加载图书和读者下拉框
   loadBorrowOptions();
   calculateDueDate();
-  
+
   $('borrowFormModal').classList.remove('hidden');
 }
 
@@ -1039,7 +1039,7 @@ function closeBorrowFormModal() {
 function calculateDueDate() {
   const outDate = $('borrowOutDate').value;
   const days = parseInt($('borrowDays').value) || 30;
-  
+
   if (outDate) {
     const dueDate = new Date(outDate);
     dueDate.setDate(dueDate.getDate() + days);
@@ -1060,7 +1060,7 @@ async function submitBorrowForm() {
   const dueDate = $('borrowDueDate').value;
   const remarkType = $('borrowRemarkType').value;
   const remark = $('borrowRemark').value;
-  
+
   // 表单校验
   if (!bookId) {
     toast('请选择借阅的图书', 'error');
@@ -1078,14 +1078,14 @@ async function submitBorrowForm() {
     toast('最长借阅天数为30天', 'error');
     return;
   }
-  
+
   // 组合备注
   let fullRemark = remark;
   if (remarkType) {
     const typeMap = { teacher: '教师借阅', holiday: '学生假期借阅' };
     fullRemark = remark ? `${typeMap[remarkType]} - ${remark}` : typeMap[remarkType];
   }
-  
+
   try {
     await api('/api/borrow-records', {
       method: 'POST',
@@ -1097,13 +1097,13 @@ async function submitBorrowForm() {
         remark: fullRemark || null
       })
     });
-    
+
     // 获取图书和读者信息用于提示
     const bookSelect = $('borrowBook');
     const readerSelect = $('borrowReader');
     const bookTitle = bookSelect.options[bookSelect.selectedIndex]?.text.split('(')[0] || '图书';
     const readerName = readerSelect.options[readerSelect.selectedIndex]?.text.split('(')[0] || '读者';
-    
+
     toast(`《${bookTitle}》已成功借给读者「${readerName}」，应还日期为 ${dueDate}`, 'success');
     closeBorrowFormModal();
     loadRecords();
@@ -1152,7 +1152,7 @@ async function loadRecords() {
   const data = await api(`/api/borrow-records?status=${status}&keyword=${keyword}&page=${state.recordPage}&page_size=8`);
   state.lastRecords = data.items; // 保存记录以便二次确认时使用
   $('recordPageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
-  
+
   // 生成操作按钮
   const getActionButtons = (r) => {
     if (r.status === 'returned') {
@@ -1179,15 +1179,15 @@ async function loadRecords() {
     }
     return actions.join('');
   };
-  
+
   const currentUserCanReturn = (r) => {
     return state.user.role !== 'reader' || r.reader_id === state.user.id;
   };
-  
+
   const currentUserCanRenew = (r) => {
     return state.user.role !== 'reader' || r.reader_id === state.user.id;
   };
-  
+
   $('recordTable').innerHTML = `<thead><tr><th>ID</th><th>图书</th><th>读者</th><th>借出日期</th><th>应还日期</th><th>归还日期</th><th>逾期天数</th><th>状态</th><th>操作</th></tr></thead><tbody>
     ${data.items.map(r => `<tr><td>${r.id}</td><td>${escapeHtml(r.book_title)}</td><td>${escapeHtml(r.reader_name)}</td><td>${r.borrow_date}</td><td>${r.due_date}</td><td>${r.return_date || '-'}</td><td>${Math.max(0, Math.round(r.overdue_days || 0))}</td><td>${statusBadge(r.status)}</td><td>${getActionButtons(r)}</td></tr>`).join('')}
   </tbody>`;
@@ -1198,11 +1198,11 @@ async function returnBook(recordId) {
   const record = state.lastRecords.find(r => r.id === recordId);
   const bookTitle = record ? record.book_title : '该图书';
   if (!confirm(`确认归还《${bookTitle}》？`)) return;
-  try { 
-    await api(`/api/borrow-records/${recordId}/return`, { method: 'PATCH' }); 
-    toast('归还成功，库存已恢复', 'success'); 
-    loadRecords(); 
-    loadDashboard(); 
+  try {
+    await api(`/api/borrow-records/${recordId}/return`, { method: 'PATCH' });
+    toast('归还成功，库存已恢复', 'success');
+    loadRecords();
+    loadDashboard();
   }
   catch (e) { toast(e.message, 'error'); }
 }
@@ -1215,20 +1215,20 @@ async function renewBook(recordId) {
     toast('请输入有效的续借天数', 'error');
     return;
   }
-  try { 
-    await api(`/api/borrow-records/${recordId}/renew`, { method: 'PATCH', body: JSON.stringify({ days: parseInt(days) }) }); 
-    toast(`《${bookTitle}》续借成功，已延长${days}天`, 'success'); 
-    loadRecords(); 
+  try {
+    await api(`/api/borrow-records/${recordId}/renew`, { method: 'PATCH', body: JSON.stringify({ days: parseInt(days) }) });
+    toast(`《${bookTitle}》续借成功，已延长${days}天`, 'success');
+    loadRecords();
   }
   catch (e) { toast(e.message, 'error'); }
 }
 
 async function payFine(recordId) {
   if (!confirm('确认缴纳罚金？')) return;
-  try { 
-    const result = await api(`/api/borrow-records/${recordId}/pay-fine`, { method: 'POST' }); 
-    toast(result.message, 'success'); 
-    loadRecords(); 
+  try {
+    const result = await api(`/api/borrow-records/${recordId}/pay-fine`, { method: 'POST' });
+    toast(result.message, 'success');
+    loadRecords();
   }
   catch (e) { toast(e.message, 'error'); }
 }
@@ -1240,9 +1240,9 @@ async function loadReservations() {
   const keyword = encodeURIComponent($('reservationKeyword').value || '');
   const data = await api(`/api/reservations?status=${status}&keyword=${keyword}&page=${state.reservationPage}&page_size=8`);
   $('reservationPageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
-  
+
   const statusMap = { pending: '待处理', notified: '已通知', cancelled: '已取消' };
-  
+
   $('reservationTable').innerHTML = `<thead><tr><th>ID</th><th>图书</th><th>读者</th><th>预约日期</th><th>状态</th><th>操作</th></tr></thead><tbody>
     ${data.items.map(r => `<tr><td>${r.id}</td><td>${escapeHtml(r.book_title)}</td><td>${escapeHtml(r.reader_name)}</td><td>${r.reserve_date}</td><td>${statusMap[r.status] || r.status}</td><td>${r.status === 'pending' ? `<button class="danger small" onclick="cancelReservation(${r.id})">取消预约</button>` : '-'}</td></tr>`).join('') || '<tr><td colspan="6">暂无预约记录</td></tr>'}
   </tbody>`;
@@ -1250,10 +1250,10 @@ async function loadReservations() {
 
 async function cancelReservation(reservationId) {
   if (!confirm('确认取消这个预约？')) return;
-  try { 
-    await api(`/api/reservations/${reservationId}`, { method: 'DELETE' }); 
-    toast('预约已取消', 'success'); 
-    loadReservations(); 
+  try {
+    await api(`/api/reservations/${reservationId}`, { method: 'DELETE' });
+    toast('预约已取消', 'success');
+    loadReservations();
   }
   catch (e) { toast(e.message, 'error'); }
 }
@@ -1267,91 +1267,165 @@ async function loadReportView() {
 }
 
 // 逾期相关函数
+let totalPages = 1;
+
 async function loadOverdue() {
-  const sort = encodeURIComponent(currentOverdueSort || '');
-  const keyword = encodeURIComponent(overdueKeyword || '');
-  const data = await api(`/api/overdue?sort=${sort}&keyword=${keyword}&page=${overduePage}&page_size=8`);
-  
-  $('overduePageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
-  
-  // 更新统计信息
-  const items = data.items || [];
-  const total = data.total || 0;
-  const within7Days = items.filter(r => r.overdue_days > 0 && r.overdue_days <= 7).length;
-  const over14Days = items.filter(r => r.overdue_days > 14).length;
-  const totalFine = items.reduce((sum, r) => sum + (r.fine_amount || 0), 0);
-  
-  $('overdueTotal').textContent = total;
-  $('overdue7Days').textContent = within7Days;
-  $('overdue14Days').textContent = over14Days;
-  $('overdueTotalFine').textContent = `¥${totalFine.toFixed(2)}`;
-  
-  $('overdueTable').innerHTML = `
-    <thead>
-      <tr>
-        <th><input type="checkbox" id="selectAllOverdue" onclick="toggleSelectAllOverdue()" /></th>
-        <th>记录ID</th>
-        <th>图书</th>
-        <th>读者</th>
-        <th>借出日期</th>
-        <th>应还日期</th>
-        <th>逾期天数</th>
-        <th>预估罚金</th>
-        <th>状态</th>
-        <th>操作</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${items.map(r => `
+  try {
+    const sort = encodeURIComponent(currentOverdueSort || '');
+    const keyword = encodeURIComponent(overdueKeyword || '');
+
+    // 先获取全部数据用于准确统计，再获取分页数据
+    const [allData, pageData] = await Promise.all([
+      api(`/api/overdue?sort=${sort}&keyword=${keyword}&page=1&page_size=10000`),
+      api(`/api/overdue?sort=${sort}&keyword=${keyword}&page=${overduePage}&page_size=8`)
+    ]);
+
+    // 基于全部数据计算统计（不受分页影响）
+    const allItems = allData.items || [];
+    const total = allData.total || 0;
+    const within7Days = allItems.filter(r => r.overdue_days > 0 && r.overdue_days <= 7).length;
+    const over14Days = allItems.filter(r => r.overdue_days > 14).length;
+    const totalFine = allItems.reduce((sum, r) => sum + (r.fine_amount || 0), 0);
+
+    $('overdueTotal').textContent = total;
+    $('overdue7Days').textContent = within7Days;
+    $('overdue14Days').textContent = over14Days;
+    $('overdueTotalFine').textContent = `¥${totalFine.toFixed(2)}`;
+
+    const items = pageData.items || [];
+    totalPages = Math.max(1, Math.ceil((pageData.total || 0) / pageData.page_size));
+
+    // 更新分页控件
+    $('overduePageText').textContent = `第 ${pageData.page} 页 / 共 ${totalPages} 页`;
+    $('overduePrev').disabled = pageData.page <= 1;
+    $('overdueNext').disabled = pageData.page >= totalPages;
+
+    // 更新表格（样式与借还记录一致）
+    if (items.length === 0) {
+      $('overdueTable').innerHTML = `
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>图书</th>
+            <th>读者</th>
+            <th>借出日期</th>
+            <th>应还日期</th>
+            <th>逾期天数</th>
+            <th>预估罚金</th>
+            <th>状态</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="9" style="text-align: center; padding: 40px; color: #94a3b8;">暂无逾期记录</td></tr>
+        </tbody>
+      `;
+    } else {
+      $('overdueTable').innerHTML = `
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>图书</th>
+            <th>读者</th>
+            <th>借出日期</th>
+            <th>应还日期</th>
+            <th>逾期天数</th>
+            <th>预估罚金</th>
+            <th>状态</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.map(r => {
+            const overdueDays = Math.round(r.overdue_days || 0);
+            return `
+            <tr>
+              <td>${r.id}</td>
+              <td>${escapeHtml(r.book_title)}</td>
+              <td>${escapeHtml(r.reader_name)}</td>
+              <td>${r.borrow_date}</td>
+              <td>${r.due_date}</td>
+              <td class="${overdueDays > 14 ? 'text-danger' : overdueDays > 7 ? 'text-warning' : ''}">${overdueDays}</td>
+              <td>${r.fine_amount ? `<span class="text-danger">¥${r.fine_amount.toFixed(2)}</span>` : '-'}</td>
+              <td>${statusBadge(r.status)}</td>
+              <td>
+                <button class="primary small" onclick="notifyReminder(${r.id})">发送通知</button>
+              </td>
+            </tr>
+            `}).join('')}
+        </tbody>
+      `;
+    }
+
+    // 更新提醒消息区（移除 emoji 图标，用分隔线）
+    if (pageData.messages && pageData.messages.length > 0) {
+      $('reminderMessages').innerHTML = pageData.messages.map(m => `
+        <div class="reminder-message">
+          <div class="reminder-message-header">提醒 #${m.id}</div>
+          <div class="reminder-message-body">${escapeHtml(m.message)}</div>
+          <div class="reminder-message-time">${m.created_at}</div>
+        </div>
+      `).join('');
+    } else {
+      $('reminderMessages').innerHTML = '<div class="reminder-message" style="text-align:center;color:#94a3b8;font-size:13px;padding:20px;">暂无提醒消息</div>';
+    }
+
+    // 更新按钮状态
+    updateOverdueButtonStates();
+  } catch (error) {
+    console.error('加载逾期数据失败:', error);
+    toast('加载逾期数据失败，请刷新重试', 'error');
+    // 显示空状态
+    $('overdueTotal').textContent = '0';
+    $('overdue7Days').textContent = '0';
+    $('overdue14Days').textContent = '0';
+    $('overdueTotalFine').textContent = '¥0.00';
+    $('overdueTable').innerHTML = `
+      <thead>
         <tr>
-          <td><input type="checkbox" class="overdue-checkbox" value="${r.id}" /></td>
-          <td>${r.id}</td>
-          <td>${escapeHtml(r.book_title)}</td>
-          <td>${escapeHtml(r.reader_name)}</td>
-          <td>${r.borrow_date}</td>
-          <td>${r.due_date}</td>
-          <td class="${r.overdue_days > 14 ? 'text-danger' : r.overdue_days > 7 ? 'text-warning' : ''}">${Math.round(r.overdue_days)}</td>
-          <td>${r.fine_amount ? `<span class="text-danger">¥${r.fine_amount.toFixed(2)}</span>` : '-'}</td>
-          <td>${statusBadge(r.status)}</td>
-          <td>
-            <button class="btn small primary" onclick="notifyReminder(${r.id})">发送通知</button>
-            <button class="btn small ghost" onclick="viewOverdueDetail(${r.id})">详情</button>
-          </td>
+          <th>ID</th>
+          <th>图书</th>
+          <th>读者</th>
+          <th>借出日期</th>
+          <th>应还日期</th>
+          <th>逾期天数</th>
+          <th>预估罚金</th>
+          <th>状态</th>
+          <th>操作</th>
         </tr>
-      `).join('') || '<tr><td colspan="10">暂无逾期记录</td></tr>'}
-    </tbody>
-  `;
-  
-  $('reminderMessages').innerHTML = data.messages ? data.messages.map(m => `
-    <div class="reminder-message">
-      <h4>📌 提醒 ${m.id}</h4>
-      <p>${escapeHtml(m.message)}</p>
-      <small>${m.created_at}</small>
-    </div>
-  `).join('') : '<p class="text-muted">暂无提醒消息</p>';
+      </thead>
+      <tbody>
+        <tr><td colspan="9" style="text-align: center; padding: 40px; color: #94a3b8;">加载失败，请检查网络连接或刷新页面</td></tr>
+      </tbody>
+    `;
+  }
 }
 
-function toggleSelectAllOverdue() {
-  const checkboxes = document.querySelectorAll('.overdue-checkbox');
-  checkboxes.forEach(cb => cb.checked = $('selectAllOverdue').checked);
+function updateOverdueButtonStates() {
+  // 根据是否有逾期数据启用/禁用按钮
+  const overdueRecords = document.querySelectorAll('#overdueTable tbody tr:not(:last-child)');
+  const hasData = overdueRecords.length > 0 && !overdueRecords[0].querySelector('td[colspan="9"]');
+
+  // 启用/禁用按钮
+  if ($('batchNotifyBtn')) $('batchNotifyBtn').disabled = !hasData;
+  if ($('generateRemindersBtn')) $('generateRemindersBtn').disabled = !hasData;
 }
 
 async function batchNotify() {
-  const checkboxes = document.querySelectorAll('.overdue-checkbox:checked');
-  if (checkboxes.length === 0) {
-    toast('请选择要发送通知的逾期记录', 'warning');
-    return;
-  }
-  
-  if (!confirm(`确认给选中的 ${checkboxes.length} 位读者发送逾期提醒通知？`)) return;
-  
   try {
-    const ids = Array.from(checkboxes).map(cb => cb.value);
-    await api('/api/reminders/batch-notify', { 
-      method: 'POST', 
-      body: JSON.stringify({ record_ids: ids }) 
-    });
-    toast(`已成功发送 ${checkboxes.length} 条通知！`, 'success');
+    if (!confirm('确认给所有逾期读者发送提醒通知？')) return;
+    const data = await api('/api/reminders/generate', { method: 'POST' });
+    toast(`已成功生成 ${data.created_count || 0} 条提醒消息`, 'success');
+    loadOverdue();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function generateReminders() {
+  try {
+    const data = await api('/api/reminders/generate', { method: 'POST' });
+    toast(`已成功生成 ${data.created_count || 0} 条提醒消息`, 'success');
     loadOverdue();
   } catch (e) {
     toast(e.message, 'error');
@@ -1367,7 +1441,7 @@ async function viewOverdueDetail(recordId) {
       <div class="modal-content">
         <div class="modal-header">
           <h3>逾期记录详情</h3>
-          <button onclick="this.parentElement.parentElement.parentElement.remove()">×</button>
+          <button class="close-btn" onclick="this.closest('.modal').remove()">×</button>
         </div>
         <div class="modal-body">
           <table class="detail-table">
@@ -1382,8 +1456,8 @@ async function viewOverdueDetail(recordId) {
           </table>
         </div>
         <div class="modal-footer">
-          <button class="btn ghost" onclick="this.parentElement.parentElement.parentElement.remove()">关闭</button>
-          <button class="btn primary" onclick="notifyReminder(${record.id}); this.parentElement.parentElement.parentElement.remove();">发送通知</button>
+          <button class="ghost" onclick="this.closest('.modal').remove()">关闭</button>
+          ${record.status === 'overdue' ? `<button class="primary" onclick="notifyReminder(${record.id}); this.closest('.modal').remove();">发送通知</button>` : ''}
         </div>
       </div>
     `;
@@ -1395,7 +1469,7 @@ async function viewOverdueDetail(recordId) {
 
 async function notifyReminder(recordId) {
   if (!confirm('确认发送提醒通知给读者？')) return;
-  
+
   try {
     await api(`/api/borrow-records/${recordId}/notify`, { method: 'POST' });
     toast('通知发送成功！', 'success');
@@ -1415,9 +1489,9 @@ async function loadRecommendations() {
       });
       return;
     }
-    
+
     const recs = await api('/api/recommendations');
-    
+
     renderRecommendation('recCategory', recs.by_category, '根据您常借阅的图书分类推荐');
     renderRecommendation('recPopular', recs.by_popular, '热门借阅榜推荐');
     renderRecommendation('recRating', recs.by_rating, '高分书评推荐');
@@ -1430,7 +1504,7 @@ async function loadRecommendations() {
 
 function renderRecommendation(containerId, items, reason) {
   const container = $(containerId);
-  
+
   if (!items || items.length === 0) {
     container.innerHTML = `
       <div style="text-align: center; padding: 30px; color: #999;">
@@ -1441,7 +1515,7 @@ function renderRecommendation(containerId, items, reason) {
     `;
     return;
   }
-  
+
   container.innerHTML = items.map(book => `
     <div class="rec-item">
       <strong>${escapeHtml(book.title)}</strong>
@@ -1459,8 +1533,8 @@ function renderRecommendation(containerId, items, reason) {
 // 借阅推荐图书
 async function borrowRecommendedBook(bookId, bookTitle) {
   switchView('records');
-  setTimeout(() => { 
-    $('borrowBook').value = bookId; 
+  setTimeout(() => {
+    $('borrowBook').value = bookId;
     toast(`已选择《${bookTitle}》，请确认借阅信息`, 'success');
   }, 100);
 }
@@ -1469,9 +1543,9 @@ async function borrowRecommendedBook(bookId, bookTitle) {
 async function reserveRecommendedBook(bookId, bookTitle) {
   if (!confirm(`确认预约《${bookTitle}》？当图书归还时，您将收到通知。`)) return;
   try {
-    await api('/api/reservations', { 
-      method: 'POST', 
-      body: JSON.stringify({ book_id: bookId, reader_id: state.user.id }) 
+    await api('/api/reservations', {
+      method: 'POST',
+      body: JSON.stringify({ book_id: bookId, reader_id: state.user.id })
     });
     toast('预约成功！当图书归还时您将收到通知', 'success');
   } catch (e) {
@@ -1481,7 +1555,7 @@ async function reserveRecommendedBook(bookId, bookTitle) {
 
 async function loadReportReaders() {
   const data = await api('/api/readers?page=1&page_size=100');
-  $('reportReader').innerHTML = '<option value="">请选择读者</option>' + 
+  $('reportReader').innerHTML = '<option value="">请选择读者</option>' +
     data.items.map(r => `<option value="${r.id}">${escapeHtml(r.full_name)}（${escapeHtml(r.username)}${r.department ? '/' + escapeHtml(r.department) : ''}）</option>`).join('');
 }
 
@@ -1494,16 +1568,16 @@ function initReportPageEvents() {
     console.log('Report events already initialized');
     return;
   }
-  
+
   try {
     console.log('Initializing report page events...');
-    
+
     // 检查所有必需的元素是否存在
     const requiredElements = [
-      'reportReader', 'reportPeriod', 'generateReportBtn', 
+      'reportReader', 'reportPeriod', 'generateReportBtn',
       'downloadReportCsvBtn', 'downloadReportPdfBtn'
     ];
-    
+
     for (const id of requiredElements) {
       const el = $(id);
       if (!el) {
@@ -1511,12 +1585,12 @@ function initReportPageEvents() {
         throw new Error(`Required element '${id}' not found in DOM`);
       }
     }
-    
+
     // 读者选择变化时更新按钮状态
     $('reportReader').addEventListener('change', function() {
       updateReportButtonStates();
     });
-    
+
     // 报告周期变化时显示/隐藏自定义日期范围
     $('reportPeriod').addEventListener('change', function() {
       const customRanges = document.querySelectorAll('.custom-date-range');
@@ -1526,12 +1600,12 @@ function initReportPageEvents() {
         customRanges.forEach(el => el.classList.add('hidden'));
       }
     });
-    
+
     // 生成报告按钮
     $('generateReportBtn').addEventListener('click', async function() {
       await generateReportWithLoading();
     });
-    
+
     // 快捷生成报告按钮
     const quickBtn = $('quickGenerateReportBtn');
     if (quickBtn) {
@@ -1540,17 +1614,17 @@ function initReportPageEvents() {
         toast('请先选择读者，然后点击「生成报告」');
       });
     }
-    
+
     // 下载CSV按钮 - 使用onclick确保能捕获点击
     $('downloadReportCsvBtn').onclick = function(e) {
       console.log('CSV button clicked');
       console.log('Current report state:', state.currentReport);
-      
+
       if (!state.currentReport) {
         toast('请先生成报告', 'error');
         return;
       }
-      
+
       try {
         downloadReportCSV();
       } catch (err) {
@@ -1558,17 +1632,17 @@ function initReportPageEvents() {
         toast('导出失败: ' + err.message, 'error');
       }
     };
-    
+
     // 下载PDF按钮
     $('downloadReportPdfBtn').onclick = function(e) {
       console.log('PDF button clicked');
       console.log('Current report state:', state.currentReport);
-      
+
       if (!state.currentReport) {
         toast('请先生成报告', 'error');
         return;
       }
-      
+
       try {
         downloadReportPDF();
       } catch (err) {
@@ -1576,7 +1650,7 @@ function initReportPageEvents() {
         toast('导出失败: ' + err.message, 'error');
       }
     };
-    
+
     reportEventsInitialized = true;
     console.log('Report page events initialized successfully');
   } catch (error) {
@@ -1590,7 +1664,7 @@ function initReportPageEvents() {
 function updateReportButtonStates() {
   const readerId = $('reportReader').value;
   const hasReport = state.currentReport !== null;
-  
+
   // 生成报告按钮：未选择读者时置灰
   if (!readerId) {
     $('generateReportBtn').disabled = true;
@@ -1599,13 +1673,13 @@ function updateReportButtonStates() {
     $('generateReportBtn').disabled = false;
     $('generateReportBtn').title = '点击生成读书报告';
   }
-  
+
   // 下载按钮：仅当报告生成成功后可点击
   // 不使用disabled，改用onclick中判断
   $('downloadReportCsvBtn').title = hasReport ? '下载CSV格式报告' : '请先生成报告';
   $('downloadReportCsvBtn').style.opacity = hasReport ? '1' : '0.5';
   $('downloadReportCsvBtn').style.cursor = hasReport ? 'pointer' : 'not-allowed';
-  
+
   $('downloadReportPdfBtn').title = hasReport ? '下载PDF格式报告' : '请先生成报告';
   $('downloadReportPdfBtn').style.opacity = hasReport ? '1' : '0.5';
   $('downloadReportPdfBtn').style.cursor = hasReport ? 'pointer' : 'not-allowed';
@@ -1618,23 +1692,23 @@ async function generateReportWithLoading() {
     toast('请先选择读者', 'error');
     return;
   }
-  
+
   const btn = $('generateReportBtn');
   const originalText = '生成报告';
-  
+
   try {
     // 显示加载状态
     btn.disabled = true;
     btn.textContent = '生成中...';
-    
+
     let url = '/api/reports/reader';
     const params = [`reader_id=${readerId}`];
-    
+
     // 添加时间范围参数
     const period = $('reportPeriod').value;
     if (period !== 'all') {
       params.push(`period=${period}`);
-      
+
       if (period === 'custom') {
         const startDate = $('reportStartDate').value;
         const endDate = $('reportEndDate').value;
@@ -1642,21 +1716,21 @@ async function generateReportWithLoading() {
         if (endDate) params.push(`end_date=${endDate}`);
       }
     }
-    
+
     if (params.length > 0) {
       url += '?' + params.join('&');
     }
-    
+
     const report = await api(url);
     state.currentReport = report;
     state.currentReportPeriod = period; // 保存当前周期用于导出命名
     renderReport(report);
     updateReportButtonStates();
-    
+
     // 获取读者姓名用于toast
     const readerSelect = $('reportReader');
     const readerName = readerSelect.options[readerSelect.selectedIndex]?.text || '该读者';
-    
+
     toast(`读者「${readerName}」的读书报告已生成，可在线预览或下载`, 'success');
   } catch (err) {
     toast(err.message, 'error');
@@ -1675,11 +1749,11 @@ async function loadReport() {
 function renderReport(report) {
   const summary = report.summary;
   const rows = report.records;
-  
+
   // 计算趋势（与上一周期对比）
   const trendUp = '↑';
   const trendDown = '↓';
-  
+
   // 核心数据卡片
   const cardsHtml = `
     <div class="report-summary-cards">
@@ -1705,7 +1779,7 @@ function renderReport(report) {
       </div>
     </div>
   `;
-  
+
   // 可视化图表区域
   const chartsHtml = `
     <div class="report-charts">
@@ -1719,7 +1793,7 @@ function renderReport(report) {
       </div>
     </div>
   `;
-  
+
   // 明细列表
   const detailsHtml = `
     <div class="report-details">
@@ -1764,9 +1838,9 @@ function renderReport(report) {
       </div>
     </div>
   `;
-  
+
   $('reportPreview').innerHTML = cardsHtml + chartsHtml + detailsHtml;
-  
+
   // 绘制图表
   setTimeout(() => {
     drawReportCharts(rows);
@@ -1782,16 +1856,16 @@ function drawReportCharts(rows) {
     const category = item.category || '未分类';
     categoryCount[category] = (categoryCount[category] || 0) + 1;
   });
-  
+
   const categoryData = Object.entries(categoryCount).map(([name, value]) => ({ name, value }));
   if (categoryData.length > 0) {
     drawPie('reportCategoryChart', categoryData);
   }
-  
+
   // 2. 近半年借阅趋势柱状图
   const sixMonthsAgo = new Date();
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-  
+
   const monthlyCount = {};
   for (let i = 0; i < 6; i++) {
     const d = new Date();
@@ -1799,7 +1873,7 @@ function drawReportCharts(rows) {
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     monthlyCount[key] = 0;
   }
-  
+
   rows.forEach(item => {
     const borrowDate = new Date(item.borrow_date);
     if (borrowDate >= sixMonthsAgo) {
@@ -1809,11 +1883,11 @@ function drawReportCharts(rows) {
       }
     }
   });
-  
+
   const trendData = Object.entries(monthlyCount)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([day, count]) => ({ day, count }));
-  
+
   if (trendData.length > 0) {
     drawBar('reportTrendChart', trendData);
   }
@@ -1826,17 +1900,17 @@ function generateCategoryStats(rows) {
     const category = item.category || '未分类';
     categoryCount[category] = (categoryCount[category] || 0) + 1;
   });
-  
+
   const sorted = Object.entries(categoryCount)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5); // Top 5
-  
+
   const container = $('reportCategoryStats');
   if (sorted.length === 0) {
     container.innerHTML = '<p style="color: #999;">暂无数据</p>';
     return;
   }
-  
+
   container.innerHTML = sorted.map(([cat, count], idx) => `
     <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; ${idx < sorted.length - 1 ? 'border-bottom: 1px dashed var(--border);' : ''}">
       <span style="font-weight: 500;">${idx + 1}. ${escapeHtml(cat)}</span>
@@ -1848,18 +1922,18 @@ function generateCategoryStats(rows) {
 function downloadReportCSV() {
   console.log('downloadReportCSV called');
   console.log('state.currentReport:', state.currentReport);
-  
+
   if (!state.currentReport) {
     toast('请先生成报告再下载', 'error');
     return;
   }
-  
+
   try {
     const report = state.currentReport;
     const summary = report.summary;
     const rows = report.records;
     const period = state.currentReportPeriod || 'all';
-    
+
     // 获取周期中文名称
     const periodNames = {
       'all': '全部时间',
@@ -1869,7 +1943,7 @@ function downloadReportCSV() {
       'custom': '自定义'
     };
     const periodName = periodNames[period] || '全部时间';
-    
+
     const csvEscape = (value) => {
       const text = String(value ?? '');
       if (/[",\r\n]/.test(text)) {
@@ -1880,11 +1954,11 @@ function downloadReportCSV() {
 
     // 构建CSV内容
     const lines = [];
-    
+
     // 标题行
     lines.push(['读书报告']);
     lines.push([]);
-    
+
     // 基本信息
     lines.push(['读者信息']);
     lines.push(['读者姓名', report.reader_name]);
@@ -1893,7 +1967,7 @@ function downloadReportCSV() {
     lines.push(['报告周期', periodName]);
     lines.push(['生成时间', report.generated_at]);
     lines.push([]);
-    
+
     // 统计数据
     lines.push(['统计汇总']);
     lines.push(['总借阅次数', summary.total_borrowed]);
@@ -1904,14 +1978,14 @@ function downloadReportCSV() {
     lines.push(['平均借阅时长', `${summary.average_borrow_duration_days} 天`]);
     lines.push(['平均归还时长', `${summary.average_return_duration_days} 天`]);
     lines.push([]);
-    
+
     // 分类统计
     const categoryCount = {};
     rows.forEach(item => {
       const category = item.category || '未分类';
       categoryCount[category] = (categoryCount[category] || 0) + 1;
     });
-    
+
     if (Object.keys(categoryCount).length > 0) {
       lines.push(['阅读分类统计']);
       lines.push(['分类', '数量']);
@@ -1922,11 +1996,11 @@ function downloadReportCSV() {
         });
       lines.push([]);
     }
-    
+
     // 借阅明细
     lines.push(['借阅明细']);
     lines.push(['记录ID', '书名', 'ISBN', '作者', '分类', '借出日期', '应还日期', '归还日期', '状态', '借阅天数', '逾期天数']);
-    
+
     rows.forEach(item => {
       lines.push([
         item.id,
@@ -1951,9 +2025,9 @@ function downloadReportCSV() {
     const today = new Date();
     const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
     const filename = `${report.reader_name}_${periodName}_读书报告_${dateStr}.csv`;
-    
+
     console.log('Downloading file:', filename);
-    
+
     // 使用浏览器原生下载方法
     const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -1964,7 +2038,7 @@ function downloadReportCSV() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    
+
     toast(`报告已下载：${filename}`, 'success');
   } catch (err) {
     console.error('CSV export error:', err);
@@ -1977,26 +2051,26 @@ function downloadReportCSV() {
 function downloadReportPDF() {
   console.log('downloadReportPDF called');
   console.log('state.currentReport:', state.currentReport);
-  
+
   if (!state.currentReport) {
     toast('请先生成报告再下载', 'error');
     return;
   }
-  
+
   toast('正在准备PDF导出...', 'info');
-  
+
   // 创建打印窗口
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
     toast('请允许弹出窗口以导出PDF', 'error');
     return;
   }
-  
+
   const report = state.currentReport;
   const summary = report.summary;
   const rows = report.records;
   const period = state.currentReportPeriod || 'all';
-  
+
   // 获取周期中文名称
   const periodNames = {
     'all': '全部时间',
@@ -2006,18 +2080,18 @@ function downloadReportPDF() {
     'custom': '自定义'
   };
   const periodName = periodNames[period] || '全部时间';
-  
+
   // 计算分类统计
   const categoryCount = {};
   rows.forEach(item => {
     const category = item.category || '未分类';
     categoryCount[category] = (categoryCount[category] || 0) + 1;
   });
-  
+
   const sortedCategories = Object.entries(categoryCount)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5);
-  
+
   // 生成HTML内容
   const htmlContent = `
     <!DOCTYPE html>
@@ -2250,7 +2324,7 @@ function downloadReportPDF() {
     </body>
     </html>
   `;
-  
+
   printWindow.document.write(htmlContent);
   printWindow.document.close();
 }
@@ -2264,37 +2338,122 @@ function downloadCsv(filename, text) {
 
 // 公告管理功能
 async function loadAnnouncements() {
-  const status = encodeURIComponent($('announcementStatus').value || '');
-  const data = await api(`/api/announcements?status=${status}&page=${state.announcementPage}&page_size=8`);
-  $('announcementTotalText').textContent = `共 ${data.total} 条`;
-  $('announcementPageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
-  
-  const statusMap = { published: '已发布', draft: '草稿', archived: '已归档' };
-  $('announcementTable').innerHTML = `
-    <thead><tr><th>ID</th><th>标题</th><th>内容预览</th><th>发布人</th><th>状态</th><th>发布时间</th><th>操作</th></tr></thead>
-    <tbody>${data.items.map(item => `
-      <tr>
-        <td>${item.id}</td>
-        <td>${escapeHtml(item.title)}</td>
-        <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(item.content)}</td>
-        <td>${escapeHtml(item.admin_name || '系统')}</td>
-        <td><span class="badge ${item.status}">${statusMap[item.status] || item.status}</span></td>
-        <td>${item.created_at}</td>
-        <td>
-          ${state.user.role === 'admin' ? `
-            <div class="row-actions">
-              <button class="ghost" onclick="editAnnouncement(${item.id})">编辑</button>
-              <button class="danger" onclick="deleteAnnouncement(${item.id})">删除</button>
-            </div>
-          ` : ''}
-        </td>
-      </tr>`).join('')}</tbody>`;
+  try {
+    const status = encodeURIComponent($('announcementStatus').value || '');
+    const data = await api(`/api/announcements?status=${status}&page=${state.announcementPage}&page_size=8`);
+    $('announcementTotalText').textContent = `共 ${data.total} 条`;
+
+    const totalPages = Math.max(1, Math.ceil(data.total / data.page_size));
+    $('announcementPageText').textContent = `第 ${data.page} 页 / 共 ${totalPages} 页`;
+
+    $('announcementPrev').disabled = data.page <= 1;
+    $('announcementNext').disabled = data.page >= totalPages;
+
+    const statusMap = { published: '已发布', draft: '草稿', archived: '已撤回' };
+
+    // 根据状态生成操作按钮
+    const getActionButtons = (item) => {
+      if (state.user.role !== 'admin') {
+        return `<button class="ghost small" onclick="viewAnnouncementDetail(${item.id})">查看</button>`;
+      }
+
+      let buttons = `<button class="ghost small" onclick="viewAnnouncementDetail(${item.id})">查看</button>`;
+      buttons += `<button class="ghost small" onclick="editAnnouncement(${item.id})">编辑</button>`;
+
+      // 已发布状态可以撤回
+      if (item.status === 'published') {
+        buttons += `<button class="ghost small" onclick="archiveAnnouncement(${item.id})">撤回</button>`;
+      }
+
+      // 草稿状态可以发布
+      if (item.status === 'draft') {
+        buttons += `<button class="primary small" onclick="publishAnnouncement(${item.id})">发布</button>`;
+      }
+
+      buttons += `<button class="danger small" onclick="deleteAnnouncement(${item.id})">删除</button>`;
+      return buttons;
+    };
+
+    if (data.items.length === 0) {
+      $('announcementTable').innerHTML = `
+        <thead>
+          <tr><th>ID</th><th>标题</th><th>内容预览</th><th>发布人</th><th>状态</th><th>发布时间</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="7" style="text-align: center; padding: 40px; color: #94a3b8;">暂无公告</td></tr>
+        </tbody>
+      `;
+    } else {
+      $('announcementTable').innerHTML = `
+        <thead>
+          <tr><th>ID</th><th>标题</th><th>内容预览</th><th>发布人</th><th>状态</th><th>发布时间</th><th>操作</th></tr>
+        </thead>
+        <tbody>${data.items.map(item => `
+          <tr>
+            <td>${item.id}</td>
+            <td>${escapeHtml(item.title)}</td>
+            <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(item.content)}</td>
+            <td>${escapeHtml(item.admin_name || '系统')}</td>
+            <td><span class="badge ${item.status}">${statusMap[item.status] || item.status}</span></td>
+            <td>${item.created_at}</td>
+            <td>${getActionButtons(item)}</td>
+          </tr>
+        `).join('')}</tbody>
+      `;
+    }
+  } catch (error) {
+    console.error('加载公告失败:', error);
+    toast('加载公告失败，请刷新重试', 'error');
+    $('announcementTable').innerHTML = `
+      <thead>
+        <tr><th>ID</th><th>标题</th><th>内容预览</th><th>发布人</th><th>状态</th><th>发布时间</th><th>操作</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="7" style="text-align: center; padding: 40px; color: #94a3b8;">加载失败，请检查网络连接或刷新页面</td></tr>
+      </tbody>
+    `;
+  }
+}
+
+function openAnnouncementModal() {
+  $('announcementModal').classList.remove('hidden');
+  $('announcementModalTitle').textContent = '发布公告';
+  $('announcementId').value = '';
+  $('announcementTitle').value = '';
+  $('announcementContent').value = '';
+  $('announcementCharCount').textContent = '0/1000字';
+}
+
+function closeAnnouncementModal() {
+  $('announcementModal').classList.add('hidden');
 }
 
 function resetAnnouncementForm() {
   $('announcementForm').reset();
   $('announcementId').value = '';
-  $('announcementFormTitle').textContent = '发布公告';
+  $('announcementCharCount').textContent = '0/1000字';
+}
+
+async function viewAnnouncementDetail(id) {
+  try {
+    const item = await api(`/api/announcements/${id}`);
+    const statusMap = { published: '已发布', draft: '草稿', archived: '已撤回' };
+
+    $('detailAnnouncementId').textContent = item.id;
+    $('detailAnnouncementTitle').textContent = item.title;
+    $('detailAnnouncementContent').textContent = item.content;
+    $('detailAnnouncementAuthor').textContent = item.admin_name || '系统';
+    $('detailAnnouncementStatus').innerHTML = `<span class="badge ${item.status}">${statusMap[item.status] || item.status}</span>`;
+    $('detailAnnouncementTime').textContent = item.created_at;
+
+    $('announcementDetailModal').classList.remove('hidden');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function closeAnnouncementDetailModal() {
+  $('announcementDetailModal').classList.add('hidden');
 }
 
 async function editAnnouncement(id) {
@@ -2303,16 +2462,44 @@ async function editAnnouncement(id) {
     $('announcementId').value = item.id;
     $('announcementTitle').value = item.title;
     $('announcementContent').value = item.content;
-    $('announcementStatusSelect').value = item.status;
-    $('announcementFormTitle').textContent = `编辑公告 #${item.id}`;
-    toast('已填入表单，可修改后保存');
+    $('announcementCharCount').textContent = `${item.content.length}/1000字`;
+    $('announcementModalTitle').textContent = `编辑公告 #${item.id}`;
+    $('announcementModal').classList.remove('hidden');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function archiveAnnouncement(id) {
+  if (!confirm('确认撤回该公告？撤回后读者将无法查看。')) return;
+  try {
+    await api(`/api/announcements/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status: 'archived' })
+    });
+    toast('公告已撤回', 'success');
+    loadAnnouncements();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function publishAnnouncement(id) {
+  if (!confirm('确认发布该公告？发布后读者将可以查看。')) return;
+  try {
+    await api(`/api/announcements/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status: 'published' })
+    });
+    toast('公告已发布', 'success');
+    loadAnnouncements();
   } catch (e) {
     toast(e.message, 'error');
   }
 }
 
 async function deleteAnnouncement(id) {
-  if (!confirm('确认删除该公告？')) return;
+  if (!confirm('确认删除该公告？此操作不可恢复。')) return;
   try {
     await api(`/api/announcements/${id}`, { method: 'DELETE' });
     toast('删除成功', 'success');
@@ -2322,17 +2509,69 @@ async function deleteAnnouncement(id) {
   }
 }
 
+async function saveAnnouncement(status) {
+  const title = $('announcementTitle').value.trim();
+  const content = $('announcementContent').value.trim();
+
+  if (!title) {
+    toast('请输入公告标题', 'error');
+    return;
+  }
+
+  if (!content) {
+    toast('请输入公告内容', 'error');
+    return;
+  }
+
+  if (content.length > 1000) {
+    toast('公告内容不能超过1000字', 'error');
+    return;
+  }
+
+  const id = $('announcementId').value;
+  const payload = {
+    title: title,
+    content: content,
+    status: status,
+  };
+
+  const saveBtn = $('saveAnnouncementBtn');
+  const publishBtn = $('publishAnnouncementBtn');
+  saveBtn.disabled = true;
+  publishBtn.disabled = true;
+
+  try {
+    const method = id ? 'PUT' : 'POST';
+    const url = id ? `/api/announcements/${id}` : '/api/announcements';
+    await api(url, { method, body: JSON.stringify(payload) });
+
+    if (status === 'published') {
+      toast(id ? '公告已更新并发布' : '公告已发布', 'success');
+    } else {
+      toast(id ? '公告已保存为草稿' : '公告已保存为草稿', 'success');
+    }
+
+    closeAnnouncementModal();
+    loadAnnouncements();
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    saveBtn.disabled = false;
+    publishBtn.disabled = false;
+  }
+}
+
 // 操作日志功能
 async function loadAuditLogs() {
   const action = encodeURIComponent($('auditAction').value || '');
   const data = await api(`/api/audit-logs?action=${action}&page=${state.auditPage}&page_size=20`);
   $('auditPageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
-  
+
   const actionMap = {
     LOGIN: '登录', CREATE: '创建', UPDATE: '更新', DELETE: '删除',
     BORROW: '借阅', RETURN: '归还', RESET_PASSWORD: '重置密码'
   };
-  
+
   $('auditTable').innerHTML = `
     <thead><tr><th>ID</th><th>用户</th><th>操作</th><th>目标类型</th><th>目标ID</th><th>详情</th><th>时间</th></tr></thead>
     <tbody>${data.items.map(item => `
@@ -2405,95 +2644,173 @@ $('importReadersFile').addEventListener('change', handleImportReaders);
 // $('readerForm').addEventListener('submit', ...); // 已移除
 // 新增读者按钮事件绑定
 $('addReaderBtn')?.addEventListener('click', () => openReaderFormModal());
-$('recordSearchBtn').addEventListener('click', () => { state.recordPage = 1; loadRecords(); });
-$('recordPrev').addEventListener('click', () => { if (state.recordPage > 1) { state.recordPage--; loadRecords(); } });
-$('recordNext').addEventListener('click', () => { state.recordPage++; loadRecords(); });
-$('reservationSearchBtn').addEventListener('click', () => { state.reservationPage = 1; loadReservations(); });
-$('reservationStatus').addEventListener('change', () => { state.reservationPage = 1; loadReservations(); });
-$('reservationPrev').addEventListener('click', () => { if (state.reservationPage > 1) { state.reservationPage--; loadReservations(); } });
-$('reservationNext').addEventListener('click', () => { state.reservationPage++; loadReservations(); });
+$('recordSearchBtn')?.addEventListener('click', () => { state.recordPage = 1; loadRecords(); });
+$('recordPrev')?.addEventListener('click', () => { if (state.recordPage > 1) { state.recordPage--; loadRecords(); } });
+$('recordNext')?.addEventListener('click', () => { state.recordPage++; loadRecords(); });
+$('reservationSearchBtn')?.addEventListener('click', () => { state.reservationPage = 1; loadReservations(); });
+$('reservationStatus')?.addEventListener('change', () => { state.reservationPage = 1; loadReservations(); });
+$('reservationPrev')?.addEventListener('click', () => { if (state.reservationPage > 1) { state.reservationPage--; loadReservations(); } });
+$('reservationNext')?.addEventListener('click', () => { state.reservationPage++; loadReservations(); });
 // 注意：borrowForm已改为弹窗形式(borrowFormInner)，使用onclick直接调用submitBorrowForm()
 // $('borrowForm').addEventListener('submit', ...); // 已移除
 // 借书登记按钮事件绑定
 $('openBorrowFormBtn')?.addEventListener('click', openBorrowFormModal);
-$('generateReportBtn').addEventListener('click', loadReport);
-$('downloadReportBtn').addEventListener('click', downloadReport);
-$('refreshOverdueBtn').addEventListener('click', () => { overduePage = 1; loadOverdue(); });
-$('overdueSort').addEventListener('change', (e) => { currentOverdueSort = e.target.value; loadOverdue(); });
-$('overdueKeyword').addEventListener('input', (e) => { overdueKeyword = e.target.value; });
-$('overdueKeyword').addEventListener('keypress', (e) => { if (e.key === 'Enter') { overduePage = 1; loadOverdue(); } });
-$('generateRemindersBtn').addEventListener('click', async () => {
+$('generateReportBtn')?.addEventListener('click', loadReport);
+$('downloadReportBtn')?.addEventListener('click', downloadReport);
+$('refreshOverdueBtn')?.addEventListener('click', async () => {
+  const btn = $('refreshOverdueBtn');
+  btn.querySelector('.btn-text').classList.add('hidden');
+  btn.querySelector('.btn-loading').classList.remove('hidden');
+  btn.disabled = true;
+  overduePage = 1;
+  try {
+    await loadOverdue();
+  } finally {
+    btn.querySelector('.btn-text').classList.remove('hidden');
+    btn.querySelector('.btn-loading').classList.add('hidden');
+    btn.disabled = false;
+  }
+});
+$('overdueSort')?.addEventListener('change', (e) => { currentOverdueSort = e.target.value; overduePage = 1; loadOverdue(); });
+$('overdueKeyword')?.addEventListener('input', (e) => { overdueKeyword = e.target.value; });
+$('overdueKeyword')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') { overduePage = 1; loadOverdue(); } });
+$('generateRemindersBtn')?.addEventListener('click', async () => {
   if (!confirm('确认要生成提醒消息吗？')) return;
-  
+  const btn = $('generateRemindersBtn');
+  btn.querySelector('.btn-text').classList.add('hidden');
+  btn.querySelector('.btn-loading').classList.remove('hidden');
+  btn.disabled = true;
   try {
     await api('/api/reminders/generate', { method: 'POST' });
     toast('提醒消息生成成功！', 'success');
     loadOverdue();
   } catch (e) { toast(e.message, 'error'); }
-});
-$('batchNotifyBtn').addEventListener('click', batchNotify);
-$('exportOverdueBtn').addEventListener('click', async () => {
-  const sort = encodeURIComponent(currentOverdueSort || '');
-  const keyword = encodeURIComponent(overdueKeyword || '');
-  
-  try {
-    const data = await api(`/api/overdue?sort=${sort}&keyword=${keyword}&page=1&page_size=10000`);
-    const csv = Papa.unparse(data.items);
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'overdue_records.csv';
-    a.click();
-    
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    toast(e.message, 'error');
+  finally {
+    btn.querySelector('.btn-text').classList.remove('hidden');
+    btn.querySelector('.btn-loading').classList.add('hidden');
+    btn.disabled = false;
   }
 });
-$('exportBooksBtn').addEventListener('click', async () => {
+$('batchNotifyBtn')?.addEventListener('click', batchNotify);
+$('exportOverdueBtn')?.addEventListener('click', async () => {
+  const btn = $('exportOverdueBtn');
+  btn.querySelector('.btn-text').classList.add('hidden');
+  btn.querySelector('.btn-loading').classList.remove('hidden');
+  btn.disabled = true;
+  try {
+    const sort = encodeURIComponent(currentOverdueSort || '');
+    const keyword = encodeURIComponent(overdueKeyword || '');
+    const data = await api(`/api/overdue?sort=${sort}&keyword=${keyword}&page=1&page_size=10000`);
+    // 生成带日期的文件名
+    const today = new Date().toISOString().split('T')[0].replace(/-/g, '');
+    // 构建 CSV 数据
+    const headers = ['记录ID', '图书', '读者', '借出日期', '应还日期', '逾期天数', '预估罚金', '状态'];
+    const rows = (data.items || []).map(item => [
+      item.id,
+      `"${(item.book_title || '').replace(/"/g, '""')}"`,
+      `"${(item.reader_name || '').replace(/"/g, '""')}"`,
+      item.borrow_date,
+      item.due_date,
+      Math.max(0, Math.round(item.overdue_days || 0)),
+      (item.fine_amount || 0).toFixed(2),
+      item.status === 'overdue' ? '已逾期' : item.status === 'returned' ? '已归还' : '借阅中'
+    ]);
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `逾期报表_${today}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('导出成功！', 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    btn.querySelector('.btn-text').classList.remove('hidden');
+    btn.querySelector('.btn-loading').classList.add('hidden');
+    btn.disabled = false;
+  }
+});
+// 逾期分页按钮事件
+$('overduePrev')?.addEventListener('click', () => { if (overduePage > 1) { overduePage--; loadOverdue(); } });
+$('overdueNext')?.addEventListener('click', () => { if (overduePage < totalPages) { overduePage++; loadOverdue(); } });
+$('exportBooksBtn')?.addEventListener('click', async () => {
   try { const csv = await api(`/api/books/export?search=${encodeURIComponent($('bookSearch').value || '')}&category=${encodeURIComponent($('categoryFilter').value || '')}`); downloadCsv('图书列表.csv', csv); }
   catch (e) { toast(e.message, 'error'); }
 });
-$('exportRecordsBtn').addEventListener('click', async () => {
+$('exportRecordsBtn')?.addEventListener('click', async () => {
   try { const csv = await api(`/api/borrow-records/export?status=${encodeURIComponent($('recordStatus').value || '')}&keyword=${encodeURIComponent($('recordKeyword').value || '')}`); downloadCsv('借还记录.csv', csv); }
   catch (e) { toast(e.message, 'error'); }
 });
 if ($('resetReaderForm')) $('resetReaderForm').addEventListener('click', resetReaderForm);
 
 // 公告管理事件绑定
-$('listAnnouncementsBtn').addEventListener('click', () => { state.announcementPage = 1; loadAnnouncements(); });
-$('announcementStatus').addEventListener('change', () => { state.announcementPage = 1; loadAnnouncements(); });
-$('announcementPrev').addEventListener('click', () => { if (state.announcementPage > 1) { state.announcementPage--; loadAnnouncements(); } });
-$('announcementNext').addEventListener('click', () => { state.announcementPage++; loadAnnouncements(); });
-$('resetAnnouncementForm').addEventListener('click', resetAnnouncementForm);
-$('announcementForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const id = $('announcementId').value;
-  const payload = {
-    title: $('announcementTitle').value,
-    content: $('announcementContent').value,
-    status: $('announcementStatusSelect').value,
-  };
-  try {
-    const method = id ? 'PUT' : 'POST';
-    const url = id ? `/api/announcements/${id}` : '/api/announcements';
-    await api(url, { method, body: JSON.stringify(payload) });
-    toast(id ? '更新成功' : '发布成功', 'success');
-    resetAnnouncementForm();
+$('addAnnouncementBtn')?.addEventListener('click', openAnnouncementModal);
+
+$('announcementContent')?.addEventListener('input', (e) => {
+  const count = e.target.value.length;
+  $('announcementCharCount').textContent = `${count}/1000字`;
+});
+
+$('resetAnnouncementForm')?.addEventListener('click', () => {
+  resetAnnouncementForm();
+});
+
+$('saveAnnouncementBtn')?.addEventListener('click', () => {
+  saveAnnouncement('draft');
+});
+
+$('publishAnnouncementBtn')?.addEventListener('click', () => {
+  saveAnnouncement('published');
+});
+
+$('listAnnouncementsBtn')?.addEventListener('click', () => {
+  state.announcementPage = 1;
+  loadAnnouncements();
+});
+
+$('announcementStatus')?.addEventListener('change', () => {
+  state.announcementPage = 1;
+  loadAnnouncements();
+});
+
+$('announcementPrev')?.addEventListener('click', () => {
+  if (state.announcementPage > 1) {
+    state.announcementPage--;
     loadAnnouncements();
-  } catch (e) {
-    toast(e.message, 'error');
+  }
+});
+
+$('announcementNext')?.addEventListener('click', () => {
+  const totalText = $('announcementPageText').textContent;
+  const match = totalText.match(/共 (\d+) 页/);
+  const totalPages = match ? parseInt(match[1]) : 1;
+  if (state.announcementPage < totalPages) {
+    state.announcementPage++;
+    loadAnnouncements();
+  }
+});
+
+// 点击遮罩层关闭弹窗
+$('announcementModal')?.addEventListener('click', function(e) {
+  if (e.target === this) {
+    closeAnnouncementModal();
+  }
+});
+
+$('announcementDetailModal')?.addEventListener('click', function(e) {
+  if (e.target === this) {
+    closeAnnouncementDetailModal();
   }
 });
 
 // 操作日志事件绑定
-$('searchAuditBtn').addEventListener('click', () => { state.auditPage = 1; loadAuditLogs(); });
-$('auditAction').addEventListener('change', () => { state.auditPage = 1; loadAuditLogs(); });
-$('auditPrev').addEventListener('click', () => { if (state.auditPage > 1) { state.auditPage--; loadAuditLogs(); } });
-$('auditNext').addEventListener('click', () => { state.auditPage++; loadAuditLogs(); });
-$('exportAuditBtn').addEventListener('click', exportAuditLogs);
+$('searchAuditBtn')?.addEventListener('click', () => { state.auditPage = 1; loadAuditLogs(); });
+$('auditAction')?.addEventListener('change', () => { state.auditPage = 1; loadAuditLogs(); });
+$('auditPrev')?.addEventListener('click', () => { if (state.auditPage > 1) { state.auditPage--; loadAuditLogs(); } });
+$('auditNext')?.addEventListener('click', () => { state.auditPage++; loadAuditLogs(); });
+$('exportAuditBtn')?.addEventListener('click', exportAuditLogs);
 
 // 登录注册相关函数
 function showLoginPage() {
@@ -2562,18 +2879,18 @@ async function handleRegister(e) {
   const phone = $('registerPhone').value;
   const code = $('registerCode').value;
   const password = $('registerPassword').value;
-  
+
   if (!username || !full_name || !phone || !code || !password) {
     return toast('请填写完整信息', 'error');
   }
   if (password.length < 6) {
     return toast('密码至少6位', 'error');
   }
-  
+
   try {
-    await api('/api/auth/register', { 
-      method: 'POST', 
-      body: JSON.stringify({ username, full_name, phone, code, password }) 
+    await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, full_name, phone, code, password })
     });
     toast('注册成功，请登录', 'success');
     showLoginPage();
@@ -2587,18 +2904,18 @@ async function handleForgotPassword(e) {
   const phone = $('forgotPhone').value;
   const code = $('forgotCode').value;
   const newPassword = $('forgotNewPassword').value;
-  
+
   if (!phone || !code || !newPassword) {
     return toast('请填写完整信息', 'error');
   }
   if (newPassword.length < 6) {
     return toast('密码至少6位', 'error');
   }
-  
+
   try {
-    await api('/api/auth/forgot-password', { 
-      method: 'POST', 
-      body: JSON.stringify({ phone, code, new_password: newPassword }) 
+    await api('/api/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ phone, code, new_password: newPassword })
     });
     toast('密码重置成功，请登录', 'success');
     showLoginPage();
@@ -2622,7 +2939,7 @@ async function confirmChangePassword() {
   const oldPassword = $('oldPassword').value;
   const newPassword = $('newPassword').value;
   const confirmPassword = $('confirmNewPassword').value;
-  
+
   if (!oldPassword || !newPassword || !confirmPassword) {
     return toast('请填写完整信息', 'error');
   }
@@ -2632,11 +2949,11 @@ async function confirmChangePassword() {
   if (newPassword !== confirmPassword) {
     return toast('两次输入的密码不一致', 'error');
   }
-  
+
   try {
-    await api('/api/auth/change-password', { 
-      method: 'POST', 
-      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }) 
+    await api('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword })
     });
     toast('密码修改成功', 'success');
     closeChangePasswordModal();
@@ -2675,22 +2992,22 @@ if ($('applyCustomDate')) {
   $('applyCustomDate').addEventListener('click', function() {
     const startDate = $('customStartDate').value;
     const endDate = $('customEndDate').value;
-    
+
     if (!startDate || !endDate) {
       return toast('请选择开始和结束日期', 'error');
     }
-    
+
     if (new Date(startDate) > new Date(endDate)) {
       return toast('开始日期不能晚于结束日期', 'error');
     }
-    
+
     // 计算天数差
     const days = Math.ceil((new Date(endDate) - new Date(startDate)) / (1000 * 60 * 60 * 24));
     state.dashboardTimeRange = days;
-    
+
     // 更新按钮状态
     document.querySelectorAll('.time-filter-btn').forEach(b => b.classList.remove('active'));
-    
+
     // 重新加载仪表盘
     loadDashboard();
     toast(`已应用自定义日期范围：${days}天`, 'success');
@@ -2713,13 +3030,13 @@ function openReaderFormModal(reader = null) {
   $('readerDepartment').value = reader ? reader.department || '' : '';
   $('readerDepartmentCustom').value = '';
   $('readerStatus').value = reader ? reader.status : 'active';
-  
+
   // 清空验证错误
   document.querySelectorAll('#readerFormModal .validation-error').forEach(el => {
     el.textContent = '';
     el.style.display = 'none';
   });
-  
+
   $('readerFormModal').classList.remove('hidden');
 }
 
@@ -2737,7 +3054,7 @@ async function submitReaderForm() {
   const email = $('readerEmail').value;
   const department = $('readerDepartment').value || $('readerDepartmentCustom').value;
   const status = $('readerStatus').value;
-  
+
   // 表单校验
   if (!username) {
     toast('请输入用户名', 'error');
@@ -2771,7 +3088,7 @@ async function submitReaderForm() {
     toast('请输入有效的邮箱地址', 'error');
     return;
   }
-  
+
   try {
     const payload = {
       username,
@@ -2781,7 +3098,7 @@ async function submitReaderForm() {
       department: department || null,
       status
     };
-    
+
     if (id) {
       // 编辑读者
       if (password) {
@@ -2801,7 +3118,7 @@ async function submitReaderForm() {
       });
       toast(`读者「${fullName}」新增成功`, 'success');
     }
-    
+
     closeReaderFormModal();
     loadReaders();
   } catch (e) {
@@ -2823,11 +3140,11 @@ function openBorrowFormModal() {
   $('borrowDueDate').value = '';
   $('borrowRemarkType').value = '';
   $('borrowRemark').value = '';
-  
+
   // 加载图书和读者下拉框
   loadBorrowOptions();
   calculateDueDate();
-  
+
   $('borrowFormModal').classList.remove('hidden');
 }
 
@@ -2838,7 +3155,7 @@ function closeBorrowFormModal() {
 function calculateDueDate() {
   const outDate = $('borrowOutDate').value;
   const days = parseInt($('borrowDays').value) || 30;
-  
+
   if (outDate) {
     const dueDate = new Date(outDate);
     dueDate.setDate(dueDate.getDate() + days);
@@ -2859,7 +3176,7 @@ async function submitBorrowForm() {
   const dueDate = $('borrowDueDate').value;
   const remarkType = $('borrowRemarkType').value;
   const remark = $('borrowRemark').value;
-  
+
   // 表单校验
   if (!bookId) {
     toast('请选择借阅的图书', 'error');
@@ -2877,14 +3194,14 @@ async function submitBorrowForm() {
     toast('最长借阅天数为30天', 'error');
     return;
   }
-  
+
   // 组合备注
   let fullRemark = remark;
   if (remarkType) {
     const typeMap = { teacher: '教师借阅', holiday: '学生假期借阅' };
     fullRemark = remark ? `${typeMap[remarkType]} - ${remark}` : typeMap[remarkType];
   }
-  
+
   try {
     await api('/api/borrow-records', {
       method: 'POST',
@@ -2896,13 +3213,13 @@ async function submitBorrowForm() {
         remark: fullRemark || null
       })
     });
-    
+
     // 获取图书和读者信息用于提示
     const bookSelect = $('borrowBook');
     const readerSelect = $('borrowReader');
     const bookTitle = bookSelect.options[bookSelect.selectedIndex]?.text.split('(')[0] || '图书';
     const readerName = readerSelect.options[readerSelect.selectedIndex]?.text.split('(')[0] || '读者';
-    
+
     toast(`《${bookTitle}》已成功借给读者「${readerName}」，应还日期为 ${dueDate}`, 'success');
     closeBorrowFormModal();
     loadRecords();
@@ -2924,3 +3241,4 @@ $('borrowFormModal')?.addEventListener('click', function(e) {
 });
 
 }); // 结束 DOMContentLoaded
+

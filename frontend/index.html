@@ -582,77 +582,103 @@
       </section>
 
       <section id="overdue" class="view">
-        <div class="grid grid-cols-4 gap-4 mb-4">
-          <div class="stat-card">
-            <div class="stat-value" id="overdueTotal">0</div>
-            <div class="stat-label">逾期总数</div>
+        <!-- 统计卡片区域 -->
+        <div class="overdue-stats-grid">
+          <div class="overdue-stat-card overdue-stat-total">
+            <div class="overdue-stat-value" id="overdueTotal">0</div>
+            <div class="overdue-stat-label">逾期总数</div>
           </div>
-          <div class="stat-card warning">
-            <div class="stat-value" id="overdue7Days">0</div>
-            <div class="stat-label">逾期7天内</div>
+          <div class="overdue-stat-card overdue-stat-warning">
+            <div class="overdue-stat-value" id="overdue7Days">0</div>
+            <div class="overdue-stat-label">逾期7天内</div>
           </div>
-          <div class="stat-card danger">
-            <div class="stat-value" id="overdue14Days">0</div>
-            <div class="stat-label">逾期14天以上</div>
+          <div class="overdue-stat-card overdue-stat-danger">
+            <div class="overdue-stat-value" id="overdue14Days">0</div>
+            <div class="overdue-stat-label">逾期14天以上</div>
           </div>
-          <div class="stat-card info">
-            <div class="stat-value" id="overdueTotalFine">¥0.00</div>
-            <div class="stat-label">预估总罚金</div>
+          <div class="overdue-stat-card overdue-stat-info">
+            <div class="overdue-stat-value" id="overdueTotalFine">¥0.00</div>
+            <div class="overdue-stat-label">预估总罚金</div>
           </div>
         </div>
 
-        <article class="panel">
-          <div class="panel-title"><h3>逾期提醒中心</h3><span>自动扫描逾期记录并生成提醒消息</span></div>
-          <div class="toolbar">
-            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-              <input id="overdueKeyword" placeholder="图书 / 读者" />
-              <select id="overdueSort">
-                <option value="due_date_asc">应还日期↑</option>
-                <option value="due_date_desc">应还日期↓</option>
-                <option value="overdue_days_desc">逾期天数↓</option>
-                <option value="fine_desc">罚金金额↓</option>
-              </select>
-              <button id="refreshOverdueBtn" class="primary">刷新逾期列表</button>
-              <button id="generateRemindersBtn" class="danger">生成提醒消息</button>
-              <button id="batchNotifyBtn" class="primary">批量发送通知</button>
-              <button id="exportOverdueBtn" class="ghost">导出逾期报表</button>
-            </div>
+        <!-- 逾期提醒中心面板 -->
+        <div class="panel overdue-panel">
+          <div class="panel-title">
+            <h3>逾期提醒中心</h3>
+            <span>自动扫描逾期记录并生成提醒消息</span>
           </div>
+
+          <!-- 第一行：搜索和排序 -->
+          <div class="overdue-filter-row">
+            <input id="overdueKeyword" class="overdue-search-input" placeholder="图书 / 读者" />
+            <select id="overdueSort" class="overdue-sort-select">
+              <option value="due_date_asc">应还日期↑</option>
+              <option value="due_date_desc">应还日期↓</option>
+              <option value="overdue_days_desc">逾期天数↓</option>
+              <option value="fine_desc">罚金金额↓</option>
+            </select>
+          </div>
+
+          <!-- 第二行：操作按钮 -->
+          <div class="overdue-action-row">
+            <button id="refreshOverdueBtn" class="primary">
+              <span class="btn-text">刷新逾期列表</span>
+              <span class="btn-loading hidden"></span>
+            </button>
+            <button id="generateRemindersBtn" class="primary" disabled>
+              <span class="btn-text">生成提醒消息</span>
+              <span class="btn-loading hidden"></span>
+            </button>
+            <button id="batchNotifyBtn" class="primary" disabled>
+              <span class="btn-text">批量发送通知</span>
+              <span class="btn-loading hidden"></span>
+            </button>
+            <button id="exportOverdueBtn" class="ghost">
+              <span class="btn-text">导出逾期报表</span>
+              <span class="btn-loading hidden"></span>
+            </button>
+          </div>
+
+          <!-- 逾期提醒消息列表 -->
           <div id="reminderMessages" class="reminder-box"></div>
+        </div>
+
+        <!-- 逾期记录表格面板 -->
+        <div class="panel">
           <div class="table-wrap"><table id="overdueTable"></table></div>
-          <div class="pagination-bar">
-            <button id="overduePrev" class="pagination-btn" onclick="if (overduePage > 1) { overduePage--; loadOverdue(); }">上一页</button>
+          <!-- 分页控件 -->
+          <div class="pager">
+            <button id="overduePrev" class="pagination-btn" disabled onclick="if (overduePage > 1) { overduePage--; loadOverdue(); }">上一页</button>
             <span id="overduePageText">第 1 页 / 共 1 页</span>
-            <button id="overdueNext" class="pagination-btn" onclick="overduePage++; loadOverdue();">下一页</button>
+            <button id="overdueNext" class="pagination-btn" disabled onclick="if (overduePage < totalPages) { overduePage++; loadOverdue(); }">下一页</button>
           </div>
-        </article>
+        </div>
       </section>
 
       <section id="announcements" class="view">
         <article class="panel">
-          <div class="panel-title"><h3>公告管理</h3><span>发布通知，所有读者可见</span></div>
+          <div class="panel-title"><h3>公告管理</h3><span>发布通知，所有读者可见</span><span id="announcementTotalText"></span></div>
           <div class="toolbar">
-            <select id="announcementStatus"><option value="">全部状态</option><option value="published">已发布</option><option value="draft">草稿</option><option value="archived">已归档</option></select>
-            <button id="listAnnouncementsBtn" class="primary">查询</button>
+            <div class="toolbar-left">
+              <select id="announcementStatus">
+                <option value="">全部</option>
+                <option value="published">已发布</option>
+                <option value="draft">草稿</option>
+                <option value="archived">已撤回</option>
+              </select>
+              <button id="listAnnouncementsBtn" class="primary">查询</button>
+            </div>
+            <div class="toolbar-right">
+              <button id="addAnnouncementBtn" class="primary admin-only">发布公告</button>
+            </div>
           </div>
-        </article>
-
-        <article class="panel admin-only">
-          <div class="panel-title"><h3 id="announcementFormTitle">发布公告</h3><span>管理员可发布新公告</span></div>
-          <form id="announcementForm" class="form-grid">
-            <input type="hidden" id="announcementId" />
-            <label class="span-4">标题<input id="announcementTitle" required /></label>
-            <label class="span-4">内容<textarea id="announcementContent" rows="6" required></textarea></label>
-            <label>状态<select id="announcementStatusSelect"><option value="published">发布</option><option value="draft">保存草稿</option></select></label>
-            <button class="primary" type="submit">保存公告</button>
-            <button id="resetAnnouncementForm" class="ghost" type="button">清空</button>
-          </form>
-        </article>
-
-        <article class="panel">
-          <div class="panel-title"><h3>公告列表</h3><span id="announcementTotalText"></span></div>
           <div class="table-wrap"><table id="announcementTable"></table></div>
-          <div class="pager"><button id="announcementPrev">上一页</button><span id="announcementPageText"></span><button id="announcementNext">下一页</button></div>
+          <div class="pager">
+            <button id="announcementPrev" class="pagination-btn" disabled>上一页</button>
+            <span id="announcementPageText">第 1 页 / 共 1 页</span>
+            <button id="announcementNext" class="pagination-btn" disabled>下一页</button>
+          </div>
         </article>
       </section>
 
@@ -729,6 +755,68 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=4"></script>
+  <!-- 公告弹窗（发布/编辑） -->
+  <div id="announcementModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="announcementModalTitle">发布公告</h3>
+        <button class="close-btn" onclick="closeAnnouncementModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="announcementForm">
+          <input type="hidden" id="announcementId" />
+          <label>标题 <span class="required">*</span><input id="announcementTitle" placeholder="请输入公告标题" required /></label>
+          <label>内容<textarea id="announcementContent" rows="6" placeholder="请输入公告内容" required></textarea></label>
+          <div class="char-count" id="announcementCharCount">0/1000字</div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button id="resetAnnouncementForm" class="ghost" type="button">清空</button>
+        <button id="saveAnnouncementBtn" class="ghost" type="button">保存草稿</button>
+        <button id="publishAnnouncementBtn" class="primary" type="button">直接发布</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 公告详情弹窗 -->
+  <div id="announcementDetailModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>公告详情</h3>
+        <button class="close-btn" onclick="closeAnnouncementDetailModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="detail-row">
+          <span class="detail-label">公告ID：</span>
+          <span id="detailAnnouncementId"></span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">标题：</span>
+          <span id="detailAnnouncementTitle"></span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">内容：</span>
+          <div id="detailAnnouncementContent" class="detail-content"></div>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">发布人：</span>
+          <span id="detailAnnouncementAuthor"></span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">状态：</span>
+          <span id="detailAnnouncementStatus"></span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">发布时间：</span>
+          <span id="detailAnnouncementTime"></span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="ghost" onclick="closeAnnouncementDetailModal()">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=7"></script>
 </body>
 </html>
