@@ -122,10 +122,10 @@ class BookService:
         try:
             book_id = db_manager.execute(
                 """
-                INSERT INTO books(isbn, title, author, publisher, category, total_count, available_count, shelf_location, description)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO books(isbn, title, author, publisher, category, total_count, available_count, shelf_location, description, price)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (data.isbn.strip(), data.title.strip(), data.author.strip(), data.publisher.strip(), data.category.strip(), data.total_count, available, data.shelf_location.strip(), data.description.strip()),
+                (data.isbn.strip(), data.title.strip(), data.author.strip(), data.publisher.strip(), data.category.strip(), data.total_count, available, data.shelf_location.strip(), data.description.strip(), data.price),
             )
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=400, detail="ISBN 已存在，不能重复添加。")
@@ -764,8 +764,21 @@ class ExportService:
         writer.writerows(rows)
         return output.getvalue()
 
-    def export_books(self) -> str:
-        rows = db_manager.fetch_all("SELECT id, isbn, title, author, publisher, category, total_count, available_count, shelf_location, created_at FROM books ORDER BY id")
+    def export_books(self, search: str = "", category: str = "") -> str:
+        conditions = []
+        params: List[Any] = []
+        if search.strip():
+            conditions.append("(title LIKE ? OR author LIKE ? OR isbn LIKE ? OR publisher LIKE ?)")
+            like = f"%{search.strip()}%"
+            params.extend([like, like, like, like])
+        if category.strip():
+            conditions.append("category = ?")
+            params.append(category.strip())
+        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
+        rows = db_manager.fetch_all(
+            f"SELECT id, isbn, title, author, publisher, category, total_count, available_count, shelf_location, price, created_at FROM books{where_sql} ORDER BY id",
+            tuple(params)
+        )
         return self.to_csv(rows)
 
     def export_records(self, current_user: Dict[str, Any]) -> str:
@@ -789,19 +802,59 @@ class ReportService:
             raise HTTPException(status_code=400, detail="管理员请指定 reader_id。")
         return reader_service.get_reader(reader_id)
 
-    def generate_reader_report(self, current_user: Dict[str, Any], reader_id: Optional[int] = None) -> Dict[str, Any]:
+    def generate_reader_report(
+        self, 
+        current_user: Dict[str, Any], 
+        reader_id: Optional[int] = None,
+        period: str = "all",
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> Dict[str, Any]:
         reader = self._resolve_reader(current_user, reader_id)
+        
+        # 构建时间范围条件
+        conditions = ["reader_id = ?"]
+        params: List[Any] = [reader["id"]]
+        
+        if period != "all":
+            from datetime import timedelta
+            today = date.today()
+            
+            if period == "3months":
+                cutoff_date = today - timedelta(days=90)
+            elif period == "6months":
+                cutoff_date = today - timedelta(days=180)
+            elif period == "1year":
+                cutoff_date = today - timedelta(days=365)
+            elif period == "custom":
+                if start_date:
+                    cutoff_date = date.fromisoformat(start_date)
+                else:
+                    cutoff_date = today - timedelta(days=365)  # 默认一年
+                if end_date:
+                    end_dt = date.fromisoformat(end_date)
+                    conditions.append("borrow_date <= ?")
+                    params.append(end_dt.isoformat())
+            else:
+                cutoff_date = today - timedelta(days=365)
+            
+            conditions.append("borrow_date >= ?")
+            params.append(cutoff_date.isoformat())
+        
+        where_sql = " WHERE " + " AND ".join(conditions)
+        
         rows = db_manager.fetch_all(
-            "SELECT * FROM v_borrow_detail WHERE reader_id = ? ORDER BY borrow_date DESC",
-            (reader["id"],),
+            f"SELECT * FROM v_borrow_detail{where_sql} ORDER BY borrow_date DESC",
+            tuple(params),
         )
+        
         report_items: List[Dict[str, Any]] = []
         total_reading_days = 0
         total_returned_days = 0
         for row in rows:
             borrow_date = date.fromisoformat(row["borrow_date"])
-            end_date = date.fromisoformat(row["return_date"]) if row["return_date"] else date.today()
-            duration_days = max((end_date - borrow_date).days, 0)
+            end_date_val = date.fromisoformat(row["return_date"]) if row["return_date"] else date.today()
+            duration_days = max((end_date_val - borrow_date).days, 0)
             row["borrow_duration_days"] = duration_days
             report_items.append(row)
             total_reading_days += duration_days

@@ -33,12 +33,18 @@
     <section id="registerCard" class="login-card hidden">
       <div class="brand-mark">L</div>
       <h1>用户注册</h1>
-      <p>创建您的图书馆账号</p>
-      <form id="registerForm" class="form-grid">
-        <label>用户名<input id="registerUsername" placeholder="请输入用户名" required /></label>
-        <label>密码<input id="registerPassword" type="password" placeholder="请输入密码（至少6位）" required /></label>
-        <button class="primary full" type="submit">注册账号</button>
-      </form>
+        <p>创建您的图书馆账号</p>
+        <form id="registerForm" class="form-grid">
+          <label>用户名<input id="registerUsername" placeholder="请输入用户名" required /></label>
+          <label>姓名<input id="registerFullName" placeholder="请输入真实姓名" required /></label>
+          <label>手机号<input id="registerPhone" placeholder="请输入手机号" required /></label>
+          <div class="code-row">
+            <label>验证码<input id="registerCode" placeholder="请输入验证码" required /></label>
+            <button type="button" id="sendRegisterCodeBtn" class="primary code-btn">发送验证码</button>
+          </div>
+          <label>密码<input id="registerPassword" type="password" placeholder="请输入密码（至少6位）" required /></label>
+          <button class="primary full" type="submit">注册账号</button>
+        </form>
       <div class="login-links">
         <button id="backToLoginFromRegister" class="link-btn">返回登录</button>
       </div>
@@ -48,9 +54,13 @@
     <section id="forgotPasswordCard" class="login-card hidden">
       <div class="brand-mark">L</div>
       <h1>忘记密码</h1>
-      <p>通过用户名找回密码</p>
+      <p>通过手机号验证码找回密码</p>
       <form id="forgotPasswordForm" class="form-grid">
-        <label>用户名<input id="forgotUsername" placeholder="请输入用户名" required /></label>
+        <label>手机号<input id="forgotPhone" placeholder="请输入手机号" required /></label>
+        <div class="code-row">
+          <label>验证码<input id="forgotCode" placeholder="请输入验证码" required /></label>
+          <button type="button" id="sendForgotCodeBtn" class="primary code-btn">发送验证码</button>
+        </div>
         <label>新密码<input id="forgotNewPassword" type="password" placeholder="请输入新密码（至少6位）" required /></label>
         <button class="primary full" type="submit">重置密码</button>
       </form>
@@ -96,16 +106,43 @@
 
       <section id="dashboard" class="view active-view">
         <div id="metricGrid" class="metric-grid"></div>
-        <div class="chart-grid">
-          <article class="panel">
-            <div class="panel-title"><h3>馆藏分类分布</h3><span>大数据可视化</span></div>
-            <canvas id="categoryChart" height="220"></canvas>
-          </article>
-          <article class="panel">
-            <div class="panel-title"><h3>近 14 天借阅趋势</h3><span>业务趋势</span></div>
-            <canvas id="trendChart" height="220"></canvas>
-          </article>
-        </div>
+        
+        <!-- 图表和时间筛选器合并到一个面板 -->
+        <article class="panel charts-panel">
+          <div class="chart-grid">
+            <div class="chart-item">
+              <div class="panel-title"><h3>馆藏分类分布</h3><span>大数据可视化</span></div>
+              <div id="categoryChartLoading" class="chart-loading hidden">
+                <div class="skeleton-chart"></div>
+              </div>
+              <canvas id="categoryChart" height="220"></canvas>
+            </div>
+            <div class="chart-item">
+              <div class="panel-title"><h3>借阅趋势</h3><span id="trendPeriodText">近 7 天</span></div>
+              <div id="trendChartLoading" class="chart-loading hidden">
+                <div class="skeleton-chart"></div>
+              </div>
+              <canvas id="trendChart" height="220"></canvas>
+              <div id="trendEmptyMessage" class="empty-message hidden">暂无借阅数据</div>
+            </div>
+          </div>
+          
+          <!-- 时间筛选器 - 放在图表底部 -->
+          <div class="time-filter-section">
+            <div class="time-filter-quick">
+              <button class="time-filter-btn active" data-days="7">近 7 天</button>
+              <button class="time-filter-btn" data-days="30">近 30 天</button>
+              <button class="time-filter-btn" data-days="90">近 90 天</button>
+            </div>
+            <div class="time-filter-custom">
+              <span>自定义：</span>
+              <input type="date" id="customStartDate" />
+              <span>至</span>
+              <input type="date" id="customEndDate" />
+              <button id="applyCustomDate" class="primary">应用</button>
+            </div>
+          </div>
+        </article>
         <article class="panel">
           <div class="panel-title"><h3>热门图书 Top10</h3><span>按借阅次数排序</span></div>
           <div id="topBooks" class="top-list"></div>
@@ -113,105 +150,494 @@
       </section>
 
       <section id="books" class="view">
-        <article class="panel">
-          <div class="panel-title"><h3>图书检索</h3><span>支持标题 / 作者 / ISBN / 出版社模糊查询</span></div>
-          <div class="toolbar">
-            <input id="bookSearch" placeholder="输入关键词搜索图书" />
-            <select id="categoryFilter"><option value="">全部分类</option></select>
-            <button id="bookSearchBtn" class="primary">查询</button>
-            <button id="exportBooksBtn" class="ghost">导出 CSV</button>
-          </div>
-        </article>
-
-        <article class="panel admin-only">
-          <div class="panel-title"><h3 id="bookFormTitle">新增图书</h3><span>输入校验已在前后端同时实现</span></div>
-          <form id="bookForm" class="form-grid grid-4">
-            <input type="hidden" id="bookId" />
-            <label>ISBN<input id="bookIsbn" required /></label>
-            <label>书名<input id="bookTitle" required /></label>
-            <label>作者<input id="bookAuthor" required /></label>
-            <label>出版社<input id="bookPublisher" /></label>
-            <label>分类<input id="bookCategory" required /></label>
-            <label>馆藏总数<input id="bookTotal" type="number" min="0" required /></label>
-            <label>可借数量<input id="bookAvailable" type="number" min="0" /></label>
-            <label>书架位置<input id="bookShelf" /></label>
-            <label class="span-4">简介<input id="bookDescription" /></label>
-            <button class="primary" type="submit">保存图书</button>
-            <button id="resetBookForm" class="ghost" type="button">清空</button>
-          </form>
-        </article>
-
-        <article class="panel">
-          <div class="panel-title"><h3>图书管理</h3><span id="bookTotalText"></span></div>
-          <div class="toolbar">
+        <!-- 合并的图书管理面板 -->
+        <article class="panel books-panel">
+          <!-- 工具栏：搜索 + 操作按钮 -->
+          <div class="toolbar books-toolbar">
             <input id="bookSearch" placeholder="搜索书名、作者、ISBN、出版社" />
             <select id="categoryFilter">
               <option value="">全部分类</option>
             </select>
             <button id="bookSearchBtn" class="primary">搜索</button>
-            <label class="import-label">
-              <input type="file" id="importBooksFile" accept=".csv" hidden />
-              <button id="importBooksBtn" class="primary">批量导入CSV</button>
-            </label>
+            <div class="toolbar-actions">
+              <button id="addBookBtn" class="primary admin-only">+ 新增图书</button>
+              <button id="exportBooksBtn" class="ghost">导出 CSV</button>
+              <label class="import-label admin-only">
+                <input type="file" id="importBooksFile" accept=".csv" hidden />
+                <button id="importBooksBtn" class="ghost">批量导入</button>
+              </label>
+              <span id="bookTotalText" class="toolbar-total"></span>
+            </div>
           </div>
+          
+          <!-- 导入结果提示 -->
           <div id="importBooksResult" class="import-result hidden"></div>
+          
+          <!-- 图书卡片网格 -->
           <div id="bookGrid" class="book-grid"></div>
-          <div class="pager"><button id="bookPrev">上一页</button><span id="bookPageText"></span><button id="bookNext">下一页</button></div>
+          
+          <!-- 分页 -->
+          <div class="pager">
+            <button id="bookPrev">上一页</button>
+            <span id="bookPageText"></span>
+            <button id="bookNext">下一页</button>
+          </div>
         </article>
       </section>
+      
+      <!-- 新增/编辑图书弹窗 -->
+      <div id="bookFormModal" class="modal hidden">
+        <div class="modal-content book-form-modal square-modal">
+          <div class="modal-header sticky-header">
+            <h3 id="bookFormTitle">新增图书</h3>
+            <button class="close-btn" onclick="closeBookFormModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form id="bookForm" class="form-grid">
+              <input type="hidden" id="bookId" />
+              
+              <!-- 基础信息 -->
+              <div class="form-section">
+                <h4>基础信息</h4>
+                <div class="form-row">
+                  <label>ISBN
+                    <input id="bookIsbn" required placeholder="* 请输入10或13位ISBN" />
+                    <span class="validation-error"></span>
+                  </label>
+                  <label>书名
+                    <input id="bookTitle" required placeholder="* 请输入书名" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>作者
+                    <input id="bookAuthor" required placeholder="* 请输入作者" />
+                    <span class="validation-error"></span>
+                  </label>
+                  <label>出版社
+                    <div class="select-wrapper">
+                      <select id="bookPublisher" class="closable-select">
+                        <option value="">请选择或输入</option>
+                      </select>
+                      <button type="button" class="select-clear" onclick="clearSelect('bookPublisher')">&times;</button>
+                    </div>
+                    <input id="bookPublisherCustom" placeholder="或手动输入" style="margin-top: 4px;" />
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>分类
+                    <div class="select-wrapper">
+                      <select id="bookCategory" required class="closable-select">
+                        <option value="">* 请选择分类</option>
+                      </select>
+                      <button type="button" class="select-clear" onclick="clearSelect('bookCategory')">&times;</button>
+                    </div>
+                    <input id="bookCategoryCustom" placeholder="或输入新分类" style="margin-top: 4px;" />
+                  </label>
+                  <label>书架位置
+                    <div class="select-wrapper">
+                      <select id="bookShelf" class="closable-select">
+                        <option value="">请选择书架</option>
+                      </select>
+                      <button type="button" class="select-clear" onclick="clearSelect('bookShelf')">&times;</button>
+                    </div>
+                    <input id="bookShelfCustom" placeholder="或手动输入" style="margin-top: 4px;" />
+                  </label>
+                </div>
+              </div>
+              
+              <!-- 库存信息 -->
+              <div class="form-section">
+                <h4>库存信息</h4>
+                <div class="form-row">
+                  <label>馆藏总数
+                    <input id="bookTotal" type="number" min="1" required placeholder="* 请输入馆藏总数" />
+                    <span class="validation-error"></span>
+                  </label>
+                  <label>可借数量
+                    <input id="bookAvailable" type="number" min="0" placeholder="默认为馆藏总数" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>价格
+                    <input id="bookPrice" type="number" min="0" step="0.01" placeholder="0.00" />
+                  </label>
+                </div>
+              </div>
+              
+              <!-- 补充信息 -->
+              <div class="form-section">
+                <h4>补充信息</h4>
+                <label>简介（最多500字）
+                  <textarea id="bookDescription" maxlength="500" rows="4" placeholder="请输入图书简介..."></textarea>
+                  <span class="char-count">0/500</span>
+                </label>
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button id="resetBookForm" class="ghost" type="button">清空</button>
+            <button class="primary" onclick="submitBookForm()">保存</button>
+          </div>
+        </div>
+      </div>
 
       <section id="readers" class="view">
-        <article class="panel">
-          <div class="panel-title"><h3>读者信息管理</h3><span>仅管理员可见</span></div>
-          <div class="toolbar">
+        <article class="panel readers-panel">
+          <div class="toolbar readers-toolbar">
             <input id="readerSearch" placeholder="姓名 / 用户名 / 手机 / 邮箱 / 院系" />
             <button id="readerSearchBtn" class="primary">查询</button>
-            <button id="exportReadersBtn" class="ghost">导出 CSV</button>
-            <label class="import-label">
-              <input type="file" id="importReadersFile" accept=".csv" hidden />
-              <button id="importReadersBtn" class="primary">批量导入</button>
-            </label>
+            <div class="toolbar-actions">
+              <button id="addReaderBtn" class="primary admin-only">+ 新增读者</button>
+              <button id="exportReadersBtn" class="ghost">导出 CSV</button>
+              <label class="import-label">
+                <input type="file" id="importReadersFile" accept=".csv" hidden />
+                <button id="importReadersBtn" class="primary">批量导入</button>
+              </label>
+            </div>
           </div>
           <div id="importResult" class="import-result hidden"></div>
-          <form id="readerForm" class="form-grid grid-4">
-            <input type="hidden" id="readerId" />
-            <label>用户名<input id="readerUsername" required /></label>
-            <label>密码<input id="readerPassword" type="password" placeholder="新增必填，编辑留空不改" /></label>
-            <label>姓名<input id="readerFullName" required /></label>
-            <label>状态<select id="readerStatus"><option value="active">正常</option><option value="frozen">冻结</option></select></label>
-            <label>手机<input id="readerPhone" /></label>
-            <label>邮箱<input id="readerEmail" /></label>
-            <label class="span-2">院系/单位<input id="readerDepartment" /></label>
-            <button class="primary" type="submit">保存读者</button>
-            <button id="resetReaderForm" class="ghost" type="button">清空</button>
-          </form>
+          <div class="table-wrap"><table id="readerTable"></table></div>
         </article>
-        <article class="panel"><div class="table-wrap"><table id="readerTable"></table></div></article>
       </section>
 
+      <!-- 读者表单弹窗 -->
+      <div id="readerFormModal" class="modal hidden">
+        <div class="modal-content reader-form-modal square-modal">
+          <div class="modal-header sticky-header">
+            <h3 id="readerFormTitle">新增读者</h3>
+            <button class="close-btn" onclick="closeReaderFormModal()" title="关闭">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form id="readerFormInner" class="form-grid">
+              <input type="hidden" id="readerId" />
+
+              <!-- 账号信息 -->
+              <div class="form-section">
+                <h4>账号信息</h4>
+                <div class="form-row">
+                  <label>用户名
+                    <input id="readerUsername" required placeholder="* 请输入用户名" />
+                    <span class="validation-error"></span>
+                  </label>
+                  <label>密码
+                    <input id="readerPassword" type="password" required placeholder="* 请输入密码（至少8位，含数字和字母）" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>确认密码
+                    <input id="readerConfirmPassword" type="password" required placeholder="* 请再次输入密码" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- 个人信息 -->
+              <div class="form-section">
+                <h4>个人信息</h4>
+                <div class="form-row">
+                  <label>姓名
+                    <input id="readerFullName" required placeholder="* 请输入姓名" />
+                    <span class="validation-error"></span>
+                  </label>
+                  <label>手机
+                    <input id="readerPhone" required placeholder="* 请输入11位手机号" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>邮箱
+                    <input id="readerEmail" placeholder="请输入邮箱地址" />
+                    <span class="validation-error"></span>
+                  </label>
+                  <label>院系/单位
+                    <div class="select-wrapper">
+                      <select id="readerDepartment" class="closable-select">
+                        <option value="">请选择院系</option>
+                        <option>计算机学院</option>
+                        <option>软件学院</option>
+                        <option>信息工程学院</option>
+                        <option>经管学院</option>
+                        <option>文学院</option>
+                        <option>外国语学院</option>
+                        <option>艺术学院</option>
+                        <option>理学院</option>
+                        <option>机械学院</option>
+                        <option>电子学院</option>
+                      </select>
+                      <button class="select-clear" onclick="clearSelect('readerDepartment')">&times;</button>
+                    </div>
+                    <input id="readerDepartmentCustom" placeholder="或手动输入" />
+                  </label>
+                </div>
+              </div>
+
+              <!-- 状态信息 -->
+              <div class="form-section">
+                <h4>状态信息</h4>
+                <div class="form-row">
+                  <label>状态
+                    <select id="readerStatus">
+                      <option value="active">正常（可借阅）</option>
+                      <option value="frozen">冻结（暂停借阅）</option>
+                      <option value="cancelled">注销（不可恢复）</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button class="ghost" onclick="closeReaderFormModal()" type="button">取消</button>
+            <button class="primary" onclick="submitReaderForm()">保存读者</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 编辑读者弹窗 -->
+      <div id="editReaderModal" class="modal hidden">
+        <div class="modal-content reader-form-modal square-modal">
+          <div class="modal-header sticky-header">
+            <h3 id="editReaderTitle">编辑读者</h3>
+            <button class="close-btn" onclick="closeEditReaderModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form id="editReaderForm" class="form-grid">
+              <input type="hidden" id="editReaderId" />
+
+              <!-- 基本信息 -->
+              <div class="form-section">
+                <h4>基本信息</h4>
+                <div class="form-row">
+                  <label>用户名
+                    <input id="editReaderUsername" readonly class="readonly-input" />
+                  </label>
+                  <label>姓名
+                    <input id="editReaderFullName" required placeholder="请输入读者姓名（必填）" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>手机号
+                    <input id="editReaderPhone" required placeholder="请输入11位手机号（必填）" maxlength="11" />
+                    <span class="validation-error"></span>
+                  </label>
+                  <label>邮箱
+                    <input id="editReaderEmail" placeholder="请输入邮箱地址" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- 所属信息 -->
+              <div class="form-section">
+                <h4>所属信息</h4>
+                <div class="form-row">
+                  <label>院系
+                    <div class="select-wrapper">
+                      <select id="editReaderDepartment" class="closable-select" required>
+                        <option value="">请选择所属院系（必填）</option>
+                        <option>计算机学院</option>
+                        <option>软件学院</option>
+                        <option>信息工程学院</option>
+                        <option>经管学院</option>
+                        <option>文学院</option>
+                        <option>外国语学院</option>
+                        <option>艺术学院</option>
+                        <option>理学院</option>
+                        <option>机械学院</option>
+                        <option>电子学院</option>
+                      </select>
+                      <button type="button" class="select-clear" onclick="clearSelect('editReaderDepartment')">&times;</button>
+                    </div>
+                    <span class="validation-error"></span>
+                  </label>
+                  <label>身份角色
+                    <select id="editReaderRole">
+                      <option value="student">学生</option>
+                      <option value="teacher">老师</option>
+                      <option value="admin">管理员</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <!-- 借阅规则 -->
+              <div class="form-section">
+                <h4>借阅规则</h4>
+                <div class="form-row">
+                  <label>可借阅天数
+                    <input id="editReaderMaxDays" type="number" min="1" placeholder="90" />
+                  </label>
+                  <label>最大可借数量
+                    <input id="editReaderMaxBooks" type="number" min="1" placeholder="10" />
+                  </label>
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button id="cancelEditReaderBtn" class="ghost" type="button">取消</button>
+            <button id="submitEditReaderBtn" class="primary">保存</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 重置密码弹窗 -->
+      <div id="resetPwdModal" class="modal hidden">
+        <div class="modal-content">
+          <div class="modal-header sticky-header">
+            <h3>重置密码</h3>
+            <button class="close-btn" onclick="closeResetPwdModal()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form id="resetPwdForm" class="form-grid">
+              <input type="hidden" id="resetPwdReaderId" />
+              
+              <!-- 读者信息 -->
+              <div class="form-section">
+                <h4>读者信息</h4>
+                <div class="form-row">
+                  <label>用户名
+                    <input id="resetPwdUsername" readonly class="readonly-input" />
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>姓名
+                    <input id="resetPwdFullName" readonly class="readonly-input" />
+                  </label>
+                </div>
+              </div>
+
+              <!-- 密码设置 -->
+              <div class="form-section">
+                <h4>密码设置</h4>
+                <div class="form-row">
+                  <label>新密码 <span class="required">*</span>
+                    <input id="resetPwdNew" type="password" required placeholder="请输入新密码" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>确认密码 <span class="required">*</span>
+                    <input id="resetPwdConfirm" type="password" required placeholder="请再次输入新密码" />
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button id="cancelResetPwdBtn" class="ghost" type="button">取消</button>
+            <button id="submitResetPwdBtn" class="primary">重置密码</button>
+          </div>
+        </div>
+      </div>
+
       <section id="records" class="view">
-        <article class="panel">
-          <div class="panel-title"><h3>借书登记</h3><span>库存自动扣减，归还自动恢复</span></div>
-          <form id="borrowForm" class="form-grid grid-4">
-            <label>图书<select id="borrowBook" required></select></label>
-            <label class="admin-only">读者<select id="borrowReader"></select></label>
-            <label>借阅天数<input id="borrowDays" type="number" value="30" min="1" max="180" required /></label>
-            <label>备注<input id="borrowRemark" placeholder="可选" /></label>
-            <button class="primary" type="submit">确认借书</button>
-          </form>
-        </article>
-        <article class="panel">
-          <div class="panel-title"><h3>借还记录</h3><span>分页查询 + 状态筛选</span></div>
-          <div class="toolbar">
+        <article class="panel records-panel">
+          <div class="toolbar records-toolbar">
             <input id="recordKeyword" placeholder="书名 / 读者 / ISBN" />
             <select id="recordStatus"><option value="">全部状态</option><option value="borrowed">借阅中</option><option value="overdue">已逾期</option><option value="returned">已归还</option></select>
             <button id="recordSearchBtn" class="primary">查询</button>
-            <button id="exportRecordsBtn" class="ghost">导出 CSV</button>
+            <span id="recordTotalText" class="toolbar-total"></span>
+            <div class="toolbar-actions">
+              <button id="openBorrowFormBtn" class="primary admin-only">+ 借书登记</button>
+              <button id="exportRecordsBtn" class="ghost">导出 CSV</button>
+            </div>
           </div>
           <div class="table-wrap"><table id="recordTable"></table></div>
           <div class="pager"><button id="recordPrev">上一页</button><span id="recordPageText"></span><button id="recordNext">下一页</button></div>
         </article>
       </section>
+
+      <!-- 借书登记弹窗 -->
+      <div id="borrowFormModal" class="modal hidden">
+        <div class="modal-content borrow-form-modal square-modal">
+          <div class="modal-header sticky-header">
+            <h3>借书登记</h3>
+            <button class="close-btn" onclick="closeBorrowFormModal()" title="关闭">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form id="borrowFormInner" class="form-grid">
+              <!-- 图书信息 -->
+              <div class="form-section">
+                <h4>图书信息</h4>
+                <div class="form-row">
+                  <label>选择图书
+                    <select id="borrowBook" required>
+                      <option value="">请选择图书</option>
+                    </select>
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- 读者信息 -->
+              <div class="form-section">
+                <h4>读者信息</h4>
+                <div class="form-row">
+                  <label>选择读者
+                    <select id="borrowReader" required>
+                      <option value="">请选择读者</option>
+                    </select>
+                    <span class="validation-error"></span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- 借阅规则 -->
+              <div class="form-section">
+                <h4>借阅规则</h4>
+                <div class="form-row">
+                  <label>借出日期
+                    <input id="borrowOutDate" type="date" required />
+                  </label>
+                  <label>借阅天数
+                    <select id="borrowDays" required>
+                      <option value="7">7天</option>
+                      <option value="15">15天</option>
+                      <option value="30" selected>30天（默认）</option>
+                      <option value="60">60天</option>
+                      <option value="90">90天</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>应还日期
+                    <input id="borrowDueDate" type="text" readonly placeholder="自动计算" style="background: var(--muted);" />
+                  </label>
+                </div>
+              </div>
+
+              <!-- 备注 -->
+              <div class="form-section">
+                <h4>备注</h4>
+                <div class="form-row">
+                  <label>备注类型
+                    <select id="borrowRemarkType">
+                      <option value="">普通借阅</option>
+                      <option value="teacher">教师借阅</option>
+                      <option value="holiday">学生假期借阅</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="form-row single-column">
+                  <label>备注说明
+                    <textarea id="borrowRemark" placeholder="其他备注信息（可选）" rows="3"></textarea>
+                  </label>
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button class="ghost" onclick="closeBorrowFormModal()" type="button">取消</button>
+            <button class="primary" onclick="submitBorrowForm()">确认借书</button>
+          </div>
+        </div>
+      </div>
 
       <section id="reservations" class="view">
         <article class="panel">
@@ -238,113 +664,173 @@
       </section>
 
       <section id="reports" class="view">
+        <!-- 模块一：读者个性化读书报告（合并控件与预览） -->
         <article class="panel">
           <div class="panel-title"><h3>读者个性化读书报告</h3><span>支持在线预览与下载报告</span></div>
-          <div class="form-grid grid-3">
-            <label class="admin-only">读者<select id="reportReader"><option value="">请选择读者</option></select></label>
-            <button id="generateReportBtn" class="primary" type="button">生成报告</button>
-            <button id="downloadReportBtn" class="ghost" type="button">下载 CSV</button>
+          
+          <!-- 报告生成控制区 -->
+          <div class="report-controls">
+            <div class="control-group">
+              <label>选择读者
+                <select id="reportReader" class="admin-only"><option value="">请选择读者</option></select>
+              </label>
+            </div>
+            <div class="control-group">
+              <label>报告周期
+                <select id="reportPeriod">
+                  <option value="all">全部时间</option>
+                  <option value="3months">近3个月</option>
+                  <option value="6months">近半年</option>
+                  <option value="1year">近1年</option>
+                  <option value="custom">自定义日期范围</option>
+                </select>
+              </label>
+            </div>
+            <div class="control-group custom-date-range hidden">
+              <label>开始日期<input type="date" id="reportStartDate" /></label>
+            </div>
+            <div class="control-group custom-date-range hidden">
+              <label>结束日期<input type="date" id="reportEndDate" /></label>
+            </div>
+            <div class="control-actions">
+              <button id="generateReportBtn" class="primary" type="button" disabled title="请先选择读者">生成报告</button>
+              <button id="downloadReportCsvBtn" class="ghost" type="button" title="请先生成报告">下载 CSV</button>
+              <button id="downloadReportPdfBtn" class="ghost" type="button" title="请先生成报告">下载 PDF</button>
+            </div>
+          </div>
+          
+          <!-- 报告预览区 -->
+          <div id="reportPreview" class="report-preview">
+            <div class="report-empty-state">
+              <h4>暂无报告数据</h4>
+              <p>请选择读者并点击「生成报告」查看详细的读书报告</p>
+              <button id="quickGenerateReportBtn" class="primary">选择读者并生成报告</button>
+            </div>
           </div>
         </article>
+
+        <!-- 模块二：智能推荐（纵向排列） -->
         <article class="panel">
-          <div class="panel-title"><h3>智能推荐</h3><span>基于您的阅读习惯推荐图书</span></div>
-          <div id="recommendations" class="recommendations">
-            <div class="recommendation-section">
-              <h4><span class="icon">📚</span> 根据历史借阅分类推荐</h4>
+          <div class="panel-title"><h3>智能推荐</h3><span>基于阅读习惯推荐图书</span></div>
+          <div id="recommendations" class="recommendations-vertical">
+            <div class="recommendation-section-vertical" data-recommend-type="category" title="基于读者近半年借阅的图书分类，推荐同类型馆藏图书">
+              <h4>根据历史借阅分类推荐</h4>
               <div id="recCategory" class="rec-list"></div>
             </div>
-            <div class="recommendation-section">
-              <h4><span class="icon">🔥</span> 热门借阅榜推荐</h4>
+            <div class="recommendation-section-vertical" data-recommend-type="popular" title="基于全馆热门借阅排行榜，推荐最受欢迎的图书">
+              <h4>热门借阅榜推荐</h4>
               <div id="recPopular" class="rec-list"></div>
             </div>
-            <div class="recommendation-section">
-              <h4><span class="icon">⭐</span> 高分书评推荐</h4>
+            <div class="recommendation-section-vertical" data-recommend-type="rating" title="基于读者评分和评论数据，推荐高质量高分图书">
+              <h4>高分书评推荐</h4>
               <div id="recRating" class="rec-list"></div>
             </div>
-            <div class="recommendation-section">
-              <h4><span class="icon">🏫</span> 专业相关推荐</h4>
+            <div class="recommendation-section-vertical" data-recommend-type="department" title="基于读者所属院系/专业，推荐相关学科图书">
+              <h4>专业相关推荐</h4>
               <div id="recDepartment" class="rec-list"></div>
             </div>
           </div>
         </article>
-        <article class="panel">
-          <div class="panel-title"><h3>报告预览</h3><span>展示当前读者的借阅与阅读汇总</span></div>
-          <div id="reportPreview" class="report-preview"></div>
-        </article>
       </section>
 
       <section id="overdue" class="view">
-        <div class="grid grid-cols-4 gap-4 mb-4">
-          <div class="stat-card">
-            <div class="stat-value" id="overdueTotal">0</div>
-            <div class="stat-label">逾期总数</div>
+        <!-- 统计卡片区域 -->
+        <div class="overdue-stats-grid">
+          <div class="overdue-stat-card overdue-stat-total">
+            <div class="overdue-stat-value" id="overdueTotal">0</div>
+            <div class="overdue-stat-label">逾期总数</div>
           </div>
-          <div class="stat-card warning">
-            <div class="stat-value" id="overdue7Days">0</div>
-            <div class="stat-label">逾期7天内</div>
+          <div class="overdue-stat-card overdue-stat-warning">
+            <div class="overdue-stat-value" id="overdue7Days">0</div>
+            <div class="overdue-stat-label">逾期7天内</div>
           </div>
-          <div class="stat-card danger">
-            <div class="stat-value" id="overdue14Days">0</div>
-            <div class="stat-label">逾期14天以上</div>
+          <div class="overdue-stat-card overdue-stat-danger">
+            <div class="overdue-stat-value" id="overdue14Days">0</div>
+            <div class="overdue-stat-label">逾期14天以上</div>
           </div>
-          <div class="stat-card info">
-            <div class="stat-value" id="overdueTotalFine">¥0.00</div>
-            <div class="stat-label">预估总罚金</div>
+          <div class="overdue-stat-card overdue-stat-info">
+            <div class="overdue-stat-value" id="overdueTotalFine">¥0.00</div>
+            <div class="overdue-stat-label">预估总罚金</div>
           </div>
         </div>
-        
-        <article class="panel">
-          <div class="panel-title"><h3>逾期提醒中心</h3><span>自动扫描逾期记录并生成提醒消息</span></div>
-          <div class="toolbar">
-            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-              <input id="overdueKeyword" placeholder="图书 / 读者" />
-              <select id="overdueSort">
-                <option value="due_date_asc">应还日期↑</option>
-                <option value="due_date_desc">应还日期↓</option>
-                <option value="overdue_days_desc">逾期天数↓</option>
-                <option value="fine_desc">罚金金额↓</option>
-              </select>
-              <button id="refreshOverdueBtn" class="primary">刷新逾期列表</button>
-              <button id="generateRemindersBtn" class="danger">生成提醒消息</button>
-              <button id="batchNotifyBtn" class="primary">批量发送通知</button>
-              <button id="exportOverdueBtn" class="ghost">导出逾期报表</button>
-            </div>
+
+        <!-- 逾期提醒中心面板 -->
+        <div class="panel overdue-panel">
+          <div class="panel-title">
+            <h3>逾期提醒中心</h3>
+            <span>自动扫描逾期记录并生成提醒消息</span>
           </div>
+
+          <!-- 第一行：搜索和排序 -->
+          <div class="overdue-filter-row">
+            <input id="overdueKeyword" class="overdue-search-input" placeholder="图书 / 读者" />
+            <select id="overdueSort" class="overdue-sort-select">
+              <option value="due_date_asc">应还日期↑</option>
+              <option value="due_date_desc">应还日期↓</option>
+              <option value="overdue_days_desc">逾期天数↓</option>
+              <option value="fine_desc">罚金金额↓</option>
+            </select>
+          </div>
+
+          <!-- 第二行：操作按钮 -->
+          <div class="overdue-action-row">
+            <button id="refreshOverdueBtn" class="primary">
+              <span class="btn-text">刷新逾期列表</span>
+              <span class="btn-loading hidden"></span>
+            </button>
+            <button id="generateRemindersBtn" class="primary" disabled>
+              <span class="btn-text">生成提醒消息</span>
+              <span class="btn-loading hidden"></span>
+            </button>
+            <button id="batchNotifyBtn" class="primary" disabled>
+              <span class="btn-text">批量发送通知</span>
+              <span class="btn-loading hidden"></span>
+            </button>
+            <button id="exportOverdueBtn" class="ghost">
+              <span class="btn-text">导出逾期报表</span>
+              <span class="btn-loading hidden"></span>
+            </button>
+          </div>
+
+          <!-- 逾期提醒消息列表 -->
           <div id="reminderMessages" class="reminder-box"></div>
+        </div>
+
+        <!-- 逾期记录表格面板 -->
+        <div class="panel">
           <div class="table-wrap"><table id="overdueTable"></table></div>
-          <div class="pagination-bar">
-            <button id="overduePrev" class="pagination-btn" onclick="if (overduePage > 1) { overduePage--; loadOverdue(); }">上一页</button>
+          <!-- 分页控件 -->
+          <div class="pager">
+            <button id="overduePrev" class="pagination-btn" disabled onclick="if (overduePage > 1) { overduePage--; loadOverdue(); }">上一页</button>
             <span id="overduePageText">第 1 页 / 共 1 页</span>
-            <button id="overdueNext" class="pagination-btn" onclick="overduePage++; loadOverdue();">下一页</button>
+            <button id="overdueNext" class="pagination-btn" disabled onclick="if (overduePage < totalPages) { overduePage++; loadOverdue(); }">下一页</button>
           </div>
-        </article>
+        </div>
       </section>
 
       <section id="announcements" class="view">
         <article class="panel">
-          <div class="panel-title"><h3>公告管理</h3><span>发布通知，所有读者可见</span></div>
+          <div class="panel-title"><h3>公告管理</h3><span>发布通知，所有读者可见</span><span id="announcementTotalText"></span></div>
           <div class="toolbar">
-            <select id="announcementStatus"><option value="">全部状态</option><option value="published">已发布</option><option value="draft">草稿</option><option value="archived">已归档</option></select>
-            <button id="listAnnouncementsBtn" class="primary">查询</button>
+            <div class="toolbar-left">
+              <select id="announcementStatus">
+                <option value="">全部</option>
+                <option value="published">已发布</option>
+                <option value="draft">草稿</option>
+                <option value="archived">已撤回</option>
+              </select>
+              <button id="listAnnouncementsBtn" class="primary">查询</button>
+            </div>
+            <div class="toolbar-right">
+              <button id="addAnnouncementBtn" class="primary admin-only">发布公告</button>
+            </div>
           </div>
-        </article>
-
-        <article class="panel admin-only">
-          <div class="panel-title"><h3 id="announcementFormTitle">发布公告</h3><span>管理员可发布新公告</span></div>
-          <form id="announcementForm" class="form-grid">
-            <input type="hidden" id="announcementId" />
-            <label class="span-4">标题<input id="announcementTitle" required /></label>
-            <label class="span-4">内容<textarea id="announcementContent" rows="6" required></textarea></label>
-            <label>状态<select id="announcementStatusSelect"><option value="published">发布</option><option value="draft">保存草稿</option></select></label>
-            <button class="primary" type="submit">保存公告</button>
-            <button id="resetAnnouncementForm" class="ghost" type="button">清空</button>
-          </form>
-        </article>
-
-        <article class="panel">
-          <div class="panel-title"><h3>公告列表</h3><span id="announcementTotalText"></span></div>
           <div class="table-wrap"><table id="announcementTable"></table></div>
-          <div class="pager"><button id="announcementPrev">上一页</button><span id="announcementPageText"></span><button id="announcementNext">下一页</button></div>
+          <div class="pager">
+            <button id="announcementPrev" class="pagination-btn" disabled>上一页</button>
+            <span id="announcementPageText">第 1 页 / 共 1 页</span>
+            <button id="announcementNext" class="pagination-btn" disabled>下一页</button>
+          </div>
         </article>
       </section>
 
@@ -372,24 +858,57 @@
         <button class="close-btn" onclick="closeBookDetailModal()">&times;</button>
       </div>
       <div class="modal-body book-detail-body">
-        <div class="book-detail-cover">
+        <div class="book-detail-cover-section">
           <img id="detailCover" src="/static/placeholder-cover.png" alt="图书封面" />
-          <label id="detailCoverUpload" class="detail-cover-upload hidden"><input type="file" accept="image/*" onchange="uploadDetailCover(this)" /><span>更换封面</span></label>
+          <label id="detailCoverUpload" class="detail-cover-upload hidden">
+            <input type="file" accept="image/*" onchange="uploadDetailCover(this)" />
+            <span>更换封面</span>
+          </label>
         </div>
-        <div class="book-detail-info">
-          <h2 id="detailTitle">书名</h2>
-          <p id="detailAuthor" class="detail-author">作者</p>
-          <div class="detail-meta">
-            <p><strong>ISBN:</strong> <span id="detailIsbn"></span></p>
-            <p><strong>出版社:</strong> <span id="detailPublisher"></span></p>
-            <p><strong>分类:</strong> <span id="detailCategory"></span></p>
-            <p><strong>书架位置:</strong> <span id="detailShelf"></span></p>
-            <p><strong>库存:</strong> <span id="detailStock"></span></p>
-            <p><strong>借阅次数:</strong> <span id="detailBorrowCount"></span></p>
+        <div class="book-detail-main">
+          <div class="book-detail-header">
+            <h2 id="detailTitle">书名</h2>
+            <p id="detailAuthor" class="detail-author">作者</p>
           </div>
-          <div class="detail-description">
-            <strong>简介:</strong>
-            <p id="detailDescription">暂无简介</p>
+          <div class="book-detail-meta-section">
+            <h4>基础信息</h4>
+            <div class="detail-meta">
+              <div class="meta-row">
+                <span class="meta-label">ISBN:</span>
+                <span id="detailIsbn" class="meta-value"></span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">出版社:</span>
+                <span id="detailPublisher" class="meta-value"></span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">分类:</span>
+                <span id="detailCategory" class="meta-value"></span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">书架位置:</span>
+                <span id="detailShelf" class="meta-value"></span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">库存:</span>
+                <span id="detailStock" class="meta-value highlight"></span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">价格:</span>
+                <span id="detailPrice" class="meta-value highlight">¥0.00</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">借阅次数:</span>
+                <span id="detailBorrowCount" class="meta-value"></span>
+              </div>
+            </div>
+          </div>
+          <div class="book-detail-desc-section">
+            <h4><strong>简介:</strong></h4>
+            <div class="detail-description">
+              <p id="detailDescription">暂无简介</p>
+              <button id="toggleDescBtn" class="toggle-desc-btn hidden" onclick="toggleDescription()">展开</button>
+            </div>
           </div>
         </div>
       </div>
@@ -420,6 +939,68 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=2"></script>
+  <!-- 公告弹窗（发布/编辑） -->
+  <div id="announcementModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="announcementModalTitle">发布公告</h3>
+        <button class="close-btn" onclick="closeAnnouncementModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="announcementForm">
+          <input type="hidden" id="announcementId" />
+          <label>标题 <span class="required">*</span><input id="announcementTitle" placeholder="请输入公告标题" required /></label>
+          <label>内容<textarea id="announcementContent" rows="6" placeholder="请输入公告内容" required></textarea></label>
+          <div class="char-count" id="announcementCharCount">0/1000字</div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button id="resetAnnouncementForm" class="ghost" type="button">清空</button>
+        <button id="saveAnnouncementBtn" class="ghost" type="button">保存草稿</button>
+        <button id="publishAnnouncementBtn" class="primary" type="button">直接发布</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 公告详情弹窗 -->
+  <div id="announcementDetailModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>公告详情</h3>
+        <button class="close-btn" onclick="closeAnnouncementDetailModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="detail-row">
+          <span class="detail-label">公告ID：</span>
+          <span id="detailAnnouncementId"></span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">标题：</span>
+          <span id="detailAnnouncementTitle"></span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">内容：</span>
+          <div id="detailAnnouncementContent" class="detail-content"></div>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">发布人：</span>
+          <span id="detailAnnouncementAuthor"></span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">状态：</span>
+          <span id="detailAnnouncementStatus"></span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">发布时间：</span>
+          <span id="detailAnnouncementTime"></span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="ghost" onclick="closeAnnouncementDetailModal()">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=7"></script>
 </body>
 </html>

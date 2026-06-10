@@ -59,6 +59,18 @@ class DatabaseManager:
                 conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'reader'")
             except sqlite3.OperationalError:
                 pass
+            try:
+                conn.execute("ALTER TABLE books ADD COLUMN price REAL DEFAULT 0.0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE borrow_records ADD COLUMN fine_amount REAL DEFAULT 0.0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE borrow_records ADD COLUMN fine_paid INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
             
             conn.executescript(
                 """
@@ -87,6 +99,7 @@ class DatabaseManager:
                     shelf_location TEXT DEFAULT '',
                     description TEXT DEFAULT '',
                     cover_image TEXT DEFAULT '',
+                    price REAL DEFAULT 0.0,
                     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
                 );
@@ -100,6 +113,8 @@ class DatabaseManager:
                     return_date TEXT,
                     status TEXT NOT NULL CHECK(status IN ('borrowed', 'returned', 'overdue')),
                     remark TEXT DEFAULT '',
+                    fine_amount REAL DEFAULT 0.0,
+                    fine_paid INTEGER NOT NULL DEFAULT 0,
                     FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE RESTRICT,
                     FOREIGN KEY(reader_id) REFERENCES users(id) ON DELETE RESTRICT
                 );
