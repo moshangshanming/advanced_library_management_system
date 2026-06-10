@@ -318,6 +318,10 @@ class BorrowService:
                 (record["book_id"],),
             )
             conn.execute("UPDATE reminders SET resolved = 1 WHERE record_id = ?", (record_id,))
+        
+        # 处理该图书的预约（通知第一个预约用户）
+        self.process_reservations(record["book_id"])
+        
         return self.get_record(record_id, current_user)
 
     def _calculate_fine(self, record: Dict[str, Any]) -> float:
@@ -495,6 +499,15 @@ class BorrowService:
         # 更新状态为已通知
         db_manager.execute("UPDATE reminders SET notified = 1, notified_at = datetime('now', 'localtime') WHERE id = ?", (reminder_id,))
         
+        # 发送消息给读者
+        db_manager.execute(
+            """
+            INSERT INTO messages(user_id, title, content, type)
+            VALUES (?, ?, ?, 'overdue')
+            """,
+            (record["reader_id"], "逾期提醒", f"您借阅的《{record['book_title']}》已逾期 {max(int(record['overdue_days']), 1)} 天，请尽快归还。"),
+        )
+        
         audit_log_service.log_action(
             user_id=current_user["id"],
             action="SEND_REMINDER",
@@ -609,7 +622,7 @@ class BorrowService:
         """, tuple(params))["n"]
         
         rows = db_manager.fetch_all(f"""
-            SELECT r.*, b.title AS book_title, u.username AS reader_username, u.full_name AS reader_name
+            SELECT r.*, b.title AS book_title, b.total_count, b.available_count, u.username AS reader_username, u.full_name AS reader_name
             FROM book_reservations r
             JOIN books b ON r.book_id = b.id
             JOIN users u ON r.reader_id = u.id
@@ -635,7 +648,10 @@ class BorrowService:
         """处理预约（当图书归还时自动通知预约用户）"""
         # 获取该图书的所有待处理预约
         reservations = db_manager.fetch_all("""
-            SELECT r.* FROM book_reservations r
+            SELECT r.*, b.title AS book_title, u.username AS reader_username 
+            FROM book_reservations r
+            JOIN books b ON r.book_id = b.id
+            JOIN users u ON r.reader_id = u.id
             WHERE r.book_id = ? AND r.status = 'pending'
             ORDER BY r.reserve_date ASC
         """, (book_id,))
@@ -645,6 +661,14 @@ class BorrowService:
             db_manager.execute(
                 "UPDATE book_reservations SET status = 'notified', notified = 1 WHERE id = ?",
                 (reservations[0]["id"],)
+            )
+            
+            # 发送消息给读者
+            message_service.send_message(
+                user_id=reservations[0]["reader_id"],
+                title="预约图书已到馆",
+                content=f"您预约的图书《{reservations[0]['book_title']}》已到馆，请尽快到图书馆借阅。",
+                msg_type="reservation"
             )
 
 
@@ -849,6 +873,20 @@ class AnnouncementService:
             """,
             (data.title.strip(), data.content.strip(), admin_id, data.status),
         )
+        
+        # 如果创建时状态就是发布，发送消息给所有读者
+        if data.status == 'published':
+            announcement = self.get_announcement(announcement_id)
+            readers = db_manager.fetch_all("SELECT id FROM users WHERE role = 'reader' AND status = 'active'")
+            for reader in readers:
+                db_manager.execute(
+                    """
+                    INSERT INTO messages(user_id, title, content, type)
+                    VALUES (?, ?, ?, 'info')
+                    """,
+                    (reader["id"], f"新公告：{announcement['title']}", announcement['content'][:200] + '...' if len(announcement['content']) > 200 else announcement['content']),
+                )
+        
         return self.get_announcement(announcement_id)
 
     def get_announcement(self, announcement_id: int) -> Dict[str, Any]:
@@ -878,6 +916,21 @@ class AnnouncementService:
         fields.append("updated_at = datetime('now', 'localtime')")
         params.append(announcement_id)
         db_manager.execute(f"UPDATE announcements SET {', '.join(fields)} WHERE id = ?", tuple(params))
+        
+        # 如果状态变为发布，发送消息给所有读者
+        if 'status' in update_data and update_data['status'] == 'published':
+            announcement = self.get_announcement(announcement_id)
+            # 获取所有读者
+            readers = db_manager.fetch_all("SELECT id FROM users WHERE role = 'reader' AND status = 'active'")
+            for reader in readers:
+                db_manager.execute(
+                    """
+                    INSERT INTO messages(user_id, title, content, type)
+                    VALUES (?, ?, ?, 'info')
+                    """,
+                    (reader["id"], f"新公告：{announcement['title']}", announcement['content'][:200] + '...' if len(announcement['content']) > 200 else announcement['content']),
+                )
+        
         return self.get_announcement(announcement_id)
 
     def delete_announcement(self, announcement_id: int) -> Dict[str, str]:
@@ -1129,7 +1182,66 @@ class RecommendationService:
         }
 
 
+class MessageService:
+    """消息服务"""
+    
+    def send_message(self, user_id: int, title: str, content: str, msg_type: str = "info") -> int:
+        """发送消息给用户"""
+        cursor = db_manager.execute(
+            """
+            INSERT INTO messages(user_id, title, content, type)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, title, content, msg_type),
+        )
+        return cursor.lastrowid
+    
+    def list_messages(self, user_id: int, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+        """获取用户消息列表"""
+        page, page_size, offset = paginate(page, page_size)
+        
+        total = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM messages WHERE user_id = ?",
+            (user_id,)
+        )["n"]
+        
+        rows = db_manager.fetch_all(
+            """
+            SELECT * FROM messages 
+            WHERE user_id = ? 
+            ORDER BY created_at DESC 
+            LIMIT ? OFFSET ?
+            """,
+            (user_id, page_size, offset),
+        )
+        
+        return {"items": rows, "total": total, "page": page, "page_size": page_size}
+    
+    def get_unread_count(self, user_id: int) -> int:
+        """获取未读消息数量"""
+        result = db_manager.fetch_one(
+            "SELECT COUNT(*) AS n FROM messages WHERE user_id = ? AND read = 0",
+            (user_id,)
+        )
+        return result["n"]
+    
+    def mark_as_read(self, message_id: int, user_id: int) -> None:
+        """标记消息为已读"""
+        db_manager.execute(
+            "UPDATE messages SET read = 1 WHERE id = ? AND user_id = ?",
+            (message_id, user_id),
+        )
+    
+    def mark_all_read(self, user_id: int) -> None:
+        """标记所有消息为已读"""
+        db_manager.execute(
+            "UPDATE messages SET read = 1 WHERE user_id = ?",
+            (user_id,),
+        )
+
+
 announcement_service = AnnouncementService()
 book_review_service = BookReviewService()
 reader_bulk_import_service = ReaderBulkImportService()
 recommendation_service = RecommendationService()
+message_service = MessageService()

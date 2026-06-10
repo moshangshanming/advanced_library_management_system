@@ -997,6 +997,65 @@ label {
   gap: 8px;
 }
 
+/* 消息列表 */
+.message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.message-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  transition: all 0.2s ease;
+}
+.message-item:hover {
+  box-shadow: var(--shadow-sm);
+}
+.message-item.unread {
+  border-left: 3px solid var(--accent);
+  background: rgba(184, 134, 11, 0.03);
+}
+.message-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.message-title {
+  font-weight: 600;
+  color: var(--foreground);
+}
+.message-time {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.message-content {
+  font-size: 0.9rem;
+  color: var(--foreground);
+  line-height: 1.6;
+}
+.message-type {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+.message-type.reservation {
+  background: rgba(184, 134, 11, 0.15);
+  color: var(--accent);
+}
+.unread-badge {
+  background: #EF4444;
+  color: white;
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
 /* 表格 */
 .table-wrap {
   overflow-x: auto;

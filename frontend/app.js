@@ -95,18 +95,28 @@ function switchView(viewName) {
     readers: ['读者管理', '维护读者基础信息与账号状态。'],
     records: ['借还记录', '记录每一次借书与还书操作。'],
     reservations: ['预约管理', '管理图书预约记录，支持预约和取消预约。'],
+    messages: ['我的消息', '查看系统发送的通知消息。'],
     reports: ['读书报告', '为读者生成个性化报告并在线预览。'],
     overdue: ['逾期提醒', '发现逾期借阅并生成提醒消息。'],
     announcements: ['公告通知', '发布和查看系统公告通知。'],
     audit: ['操作日志', '查看系统操作记录和审计日志。'],
   };
-  $('pageTitle').textContent = titleMap[viewName][0];
-  $('pageSubtitle').textContent = titleMap[viewName][1];
+  
+  // 预约管理页面根据角色显示不同标题
+  if (viewName === 'reservations' && state.user.role === 'reader') {
+    $('pageTitle').textContent = '我的预约';
+    $('pageSubtitle').textContent = '查看和管理您的图书预约记录。';
+  } else {
+    $('pageTitle').textContent = titleMap[viewName][0];
+    $('pageSubtitle').textContent = titleMap[viewName][1];
+  }
+  
   if (viewName === 'dashboard') loadDashboard();
   if (viewName === 'books') loadBooks();
   if (viewName === 'readers') loadReaders();
   if (viewName === 'records') { loadBorrowOptions(); loadRecords(); }
   if (viewName === 'reservations') loadReservations();
+  if (viewName === 'messages') loadMessages();
   if (viewName === 'reports') { loadReportView(); loadRecommendations(); }
   if (viewName === 'overdue') loadOverdue();
   if (viewName === 'announcements') loadAnnouncements();
@@ -720,9 +730,32 @@ async function loadReservations() {
   
   const statusMap = { pending: '待处理', notified: '已通知', cancelled: '已取消' };
   
-  $('reservationTable').innerHTML = `<thead><tr><th>ID</th><th>图书</th><th>读者</th><th>预约日期</th><th>状态</th><th>操作</th></tr></thead><tbody>
-    ${data.items.map(r => `<tr><td>${r.id}</td><td>${escapeHtml(r.book_title)}</td><td>${escapeHtml(r.reader_name)}</td><td>${r.reserve_date}</td><td>${statusMap[r.status] || r.status}</td><td>${r.status === 'pending' ? `<button class="danger small" onclick="cancelReservation(${r.id})">取消预约</button>` : '-'}</td></tr>`).join('') || '<tr><td colspan="6">暂无预约记录</td></tr>'}
+  $('reservationTable').innerHTML = `<thead><tr><th>ID</th><th>图书</th><th>库存</th><th>读者</th><th>预约日期</th><th>状态</th><th>操作</th></tr></thead><tbody>
+    ${data.items.map(r => `<tr><td>${r.id}</td><td>${escapeHtml(r.book_title)}</td><td>${r.available_count}/${r.total_count}</td><td>${escapeHtml(r.reader_name)}</td><td>${r.reserve_date}</td><td>${statusMap[r.status] || r.status}</td><td>${renderReservationActions(r)}</td></tr>`).join('') || '<tr><td colspan="7">暂无预约记录</td></tr>'}
   </tbody>`;
+}
+
+function renderReservationActions(reservation) {
+  if (reservation.status === 'pending') {
+    if (state.user.role === 'admin' || state.user.role === 'librarian') {
+      const hasStock = reservation.available_count > 0;
+      const notifyBtnClass = hasStock ? 'btn primary small' : 'btn small ghost';
+      const notifyBtnText = hasStock ? '📚 通知读者' : '通知读者';
+      return `<button class="${notifyBtnClass}" onclick="notifyReservation(${reservation.id})">${notifyBtnText}</button> <button class="btn danger small" onclick="cancelReservation(${reservation.id})">取消预约</button>`;
+    }
+    return `<button class="btn danger small" onclick="cancelReservation(${reservation.id})">取消预约</button>`;
+  }
+  return '-';
+}
+
+async function notifyReservation(reservationId) {
+  if (!confirm('确认通知读者前来取书？')) return;
+  try { 
+    await api(`/api/reservations/${reservationId}/notify`, { method: 'POST' }); 
+    toast('通知已发送', 'success'); 
+    loadReservations(); 
+  }
+  catch (e) { toast(e.message, 'error'); }
 }
 
 async function cancelReservation(reservationId) {
@@ -733,6 +766,64 @@ async function cancelReservation(reservationId) {
     loadReservations(); 
   }
   catch (e) { toast(e.message, 'error'); }
+}
+
+state.messagePage = 1;
+
+async function loadMessages() {
+  const [messages, unreadCount] = await Promise.all([
+    api(`/api/messages?page=${state.messagePage}&page_size=10`),
+    api('/api/messages/unread-count')
+  ]);
+  
+  $('messagePageText').textContent = `第 ${messages.page} 页 / 共 ${Math.max(1, Math.ceil(messages.total / messages.page_size))} 页`;
+  $('unreadCount').innerHTML = unreadCount.count > 0 ? `<span class="unread-badge">${unreadCount.count} 未读</span>` : '';
+  
+  if (messages.items.length === 0) {
+    $('messageList').innerHTML = '<p style="text-align: center; color: var(--muted-foreground); padding: 40px;">暂无消息</p>';
+    return;
+  }
+  
+  $('messageList').innerHTML = messages.items.map(msg => `
+    <div class="message-item ${msg.read === 0 ? 'unread' : ''}" onclick="markMessageRead(${msg.id})">
+      <div class="message-header">
+        <span class="message-title">${escapeHtml(msg.title)}</span>
+        <span class="message-time">${msg.created_at}</span>
+      </div>
+      <p class="message-content">${escapeHtml(msg.content)}</p>
+      <span class="message-type ${msg.type}">${getMessageTypeLabel(msg.type)}</span>
+    </div>
+  `).join('');
+}
+
+function getMessageTypeLabel(type) {
+  const typeMap = {
+    'info': '通知',
+    'reservation': '预约',
+    'borrow': '借阅',
+    'overdue': '逾期'
+  };
+  return typeMap[type] || type;
+}
+
+async function markMessageRead(messageId) {
+  try {
+    await api(`/api/messages/${messageId}/read`, { method: 'PATCH' });
+    loadMessages();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function markAllMessagesRead() {
+  if (!confirm('确认将所有消息标记为已读？')) return;
+  try {
+    await api('/api/messages/read-all', { method: 'PATCH' });
+    toast('所有消息已标记为已读', 'success');
+    loadMessages();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
 async function loadReportView() {
@@ -1162,6 +1253,9 @@ $('reservationSearchBtn').addEventListener('click', () => { state.reservationPag
 $('reservationStatus').addEventListener('change', () => { state.reservationPage = 1; loadReservations(); });
 $('reservationPrev').addEventListener('click', () => { if (state.reservationPage > 1) { state.reservationPage--; loadReservations(); } });
 $('reservationNext').addEventListener('click', () => { state.reservationPage++; loadReservations(); });
+$('markAllReadBtn').addEventListener('click', markAllMessagesRead);
+$('messagePrev').addEventListener('click', () => { if (state.messagePage > 1) { state.messagePage--; loadMessages(); } });
+$('messageNext').addEventListener('click', () => { state.messagePage++; loadMessages(); });
 $('borrowForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const payload = { book_id: Number($('borrowBook').value), borrow_days: Number($('borrowDays').value), remark: $('borrowRemark').value };
@@ -1284,39 +1378,13 @@ function startCodeTimer(btnId, seconds = 60) {
   }, 1000);
 }
 
-async function sendRegisterCode() {
-  const phone = $('registerPhone').value;
-  if (!phone) return toast('请输入手机号', 'error');
-  try {
-    await api('/api/auth/send-code', { method: 'POST', body: JSON.stringify({ phone }) });
-    toast('验证码已发送（开发模式：验证码为 123456）', 'success');
-    startCodeTimer('sendRegisterCodeBtn');
-  } catch (e) {
-    toast(e.message, 'error');
-  }
-}
-
-async function sendForgotCode() {
-  const phone = $('forgotPhone').value;
-  if (!phone) return toast('请输入手机号', 'error');
-  try {
-    await api('/api/auth/send-forgot-code', { method: 'POST', body: JSON.stringify({ phone }) });
-    toast('验证码已发送（开发模式：验证码为 123456）', 'success');
-    startCodeTimer('sendForgotCodeBtn');
-  } catch (e) {
-    toast(e.message, 'error');
-  }
-}
-
 async function handleRegister(e) {
   e.preventDefault();
   const username = $('registerUsername').value;
-  const phone = $('registerPhone').value;
-  const code = $('registerCode').value;
   const password = $('registerPassword').value;
   
-  if (!username || !phone || !code || !password) {
-    return toast('请填写完整信息', 'error');
+  if (!username || !password) {
+    return toast('请填写用户名和密码', 'error');
   }
   if (password.length < 6) {
     return toast('密码至少6位', 'error');
@@ -1325,7 +1393,7 @@ async function handleRegister(e) {
   try {
     await api('/api/auth/register', { 
       method: 'POST', 
-      body: JSON.stringify({ username, phone, code, password }) 
+      body: JSON.stringify({ username, password }) 
     });
     toast('注册成功，请登录', 'success');
     showLoginPage();
@@ -1336,12 +1404,11 @@ async function handleRegister(e) {
 
 async function handleForgotPassword(e) {
   e.preventDefault();
-  const phone = $('forgotPhone').value;
-  const code = $('forgotCode').value;
+  const username = $('forgotUsername').value;
   const newPassword = $('forgotNewPassword').value;
   
-  if (!phone || !code || !newPassword) {
-    return toast('请填写完整信息', 'error');
+  if (!username || !newPassword) {
+    return toast('请填写用户名和新密码', 'error');
   }
   if (newPassword.length < 6) {
     return toast('密码至少6位', 'error');
@@ -1350,7 +1417,7 @@ async function handleForgotPassword(e) {
   try {
     await api('/api/auth/forgot-password', { 
       method: 'POST', 
-      body: JSON.stringify({ phone, code, new_password: newPassword }) 
+      body: JSON.stringify({ username, new_password: newPassword }) 
     });
     toast('密码重置成功，请登录', 'success');
     showLoginPage();
@@ -1402,8 +1469,6 @@ $('registerLink').addEventListener('click', showRegisterPage);
 $('forgotPasswordLink').addEventListener('click', showForgotPasswordPage);
 $('backToLoginFromRegister').addEventListener('click', showLoginPage);
 $('backToLoginFromForgot').addEventListener('click', showLoginPage);
-$('sendRegisterCodeBtn').addEventListener('click', sendRegisterCode);
-$('sendForgotCodeBtn').addEventListener('click', sendForgotCode);
 $('registerForm').addEventListener('submit', handleRegister);
 $('forgotPasswordForm').addEventListener('submit', handleForgotPassword);
 $('changePasswordBtn').addEventListener('click', showChangePasswordModal);

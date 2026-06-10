@@ -83,32 +83,24 @@ class AuthService:
         return True
 
     def register(self, data: Dict) -> Dict:
-        phone = data.get("phone", "").strip()
-        verify_code = data.get("verify_code", "").strip()
-
-        if not phone:
-            raise HTTPException(status_code=400, detail="注册需要绑定手机号码。")
-
-        self.verify_code(phone, verify_code, "register")
-
         existing = db_manager.fetch_one(
             "SELECT COUNT(*) AS n FROM users WHERE username = ?", (data["username"].strip(),)
         )["n"]
         if existing > 0:
             raise HTTPException(status_code=400, detail="用户名已存在。")
 
+        # 如果没有提供 full_name，使用 username 作为默认值
+        full_name = data.get("full_name", "").strip() or data["username"].strip()
+        
         user_id = db_manager.execute(
             """
-            INSERT INTO users(username, password_hash, role, full_name, phone, email, department, status)
-            VALUES (?, ?, 'reader', ?, ?, ?, ?, 'active')
+            INSERT INTO users(username, password_hash, role, full_name, phone, email, department, status, created_at)
+            VALUES (?, ?, 'reader', ?, '', '', '', 'active', datetime('now', 'localtime'))
             """,
             (
                 data["username"].strip(),
                 hash_password(data["password"]),
-                data["full_name"].strip(),
-                phone,
-                data.get("email", "").strip(),
-                data.get("department", "").strip(),
+                full_name,
             ),
         )
 
@@ -120,12 +112,14 @@ class AuthService:
             (user_id,),
         )
 
-    def forgot_password(self, phone: str, verify_code: str, new_password: str) -> Dict[str, str]:
-        self.verify_code(phone.strip(), verify_code.strip(), "forgot_password")
+    def forgot_password(self, username: str, new_password: str) -> Dict[str, str]:
+        user = db_manager.fetch_one("SELECT * FROM users WHERE username = ?", (username.strip(),))
+        if not user:
+            raise HTTPException(status_code=400, detail="用户不存在。")
 
         db_manager.execute(
-            "UPDATE users SET password_hash = ? WHERE phone = ?",
-            (hash_password(new_password), phone.strip()),
+            "UPDATE users SET password_hash = ? WHERE username = ?",
+            (hash_password(new_password), username.strip()),
         )
 
         return {"message": "密码重置成功，请使用新密码登录。"}

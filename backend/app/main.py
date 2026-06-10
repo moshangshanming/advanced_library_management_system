@@ -35,7 +35,7 @@ from .security import create_token, verify_password, verify_token
 from .services import (
     book_service, borrow_service, export_service, reader_service, report_service, 
     stats_service, announcement_service, audit_log_service, book_review_service,
-    reader_bulk_import_service, recommendation_service
+    reader_bulk_import_service, recommendation_service, message_service
 )
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
@@ -118,7 +118,7 @@ def register(data: RegisterRequest):
 
 @app.post("/api/auth/forgot-password")
 def forgot_password(data: ForgotPasswordRequest):
-    return auth_service.forgot_password(data.phone, data.verify_code, data.new_password)
+    return auth_service.forgot_password(data.username, data.new_password)
 
 
 @app.post("/api/auth/change-password")
@@ -432,6 +432,71 @@ def cancel_reservation(reservation_id: int, current_user: Dict[str, Any] = Depen
     return result
 
 
+@app.post("/api/reservations/{reservation_id}/notify")
+def notify_reservation(reservation_id: int, current_user: Dict[str, Any] = Depends(require_staff)):
+    """管理员手动通知预约读者"""
+    reservation = borrow_service.get_reservation(reservation_id)
+    if reservation["status"] != "pending":
+        raise HTTPException(status_code=400, detail="该预约状态不允许通知。")
+    
+    # 获取图书信息
+    book = db_manager.fetch_one("SELECT title FROM books WHERE id = ?", (reservation["book_id"],))
+    
+    # 更新预约状态为已通知
+    db_manager.execute(
+        "UPDATE book_reservations SET status = 'notified', notified = 1 WHERE id = ?",
+        (reservation_id,)
+    )
+    
+    # 发送消息给读者
+    message_service.send_message(
+        user_id=reservation["reader_id"],
+        title="预约图书已到馆",
+        content=f"您预约的图书《{book['title']}》已到馆，请尽快到图书馆借阅。",
+        msg_type="reservation"
+    )
+    
+    audit_log_service.log_action(
+        user_id=current_user["id"],
+        action="NOTIFY_RESERVATION",
+        target_type="reservation",
+        target_id=reservation_id,
+        details=f"通知读者 {reservation['reader_username']} 预约图书已到馆"
+    )
+    
+    return {"message": "通知已发送给读者。"}
+
+
+@app.get("/api/messages")
+def list_messages(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取用户消息列表"""
+    return message_service.list_messages(user_id=current_user["id"], page=page, page_size=page_size)
+
+
+@app.get("/api/messages/unread-count")
+def get_unread_count(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取未读消息数量"""
+    return {"count": message_service.get_unread_count(user_id=current_user["id"])}
+
+
+@app.patch("/api/messages/{message_id}/read")
+def mark_message_read(message_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """标记消息为已读"""
+    message_service.mark_as_read(message_id=message_id, user_id=current_user["id"])
+    return {"message": "消息已标记为已读。"}
+
+
+@app.patch("/api/messages/read-all")
+def mark_all_read(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """标记所有消息为已读"""
+    message_service.mark_all_read(user_id=current_user["id"])
+    return {"message": "所有消息已标记为已读。"}
+
+
 @app.get("/api/overdue")
 def overdue(
     sort: str = Query(default="due_date_asc"),
@@ -451,7 +516,7 @@ def generate_reminders(current_user: Dict[str, Any] = Depends(get_current_user))
 
 
 @app.post("/api/borrow-records/{record_id}/notify")
-def send_reminder(record_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+def send_reminder(record_id: int, current_user: Dict[str, Any] = Depends(require_staff)):
     return borrow_service.send_reminder(record_id, current_user)
 
 
