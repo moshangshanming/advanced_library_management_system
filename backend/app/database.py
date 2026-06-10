@@ -72,50 +72,6 @@ class DatabaseManager:
             except sqlite3.OperationalError:
                 pass
             
-            # 为预约表添加新字段（如果表已存在）
-            try:
-                conn.execute("ALTER TABLE book_reservations ADD COLUMN valid_days INTEGER DEFAULT 7")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                conn.execute("ALTER TABLE book_reservations ADD COLUMN expiry_date TEXT")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                conn.execute("ALTER TABLE book_reservations ADD COLUMN source TEXT DEFAULT 'manual'")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                conn.execute("ALTER TABLE book_reservations ADD COLUMN remark TEXT DEFAULT ''")
-            except sqlite3.OperationalError:
-                pass
-            
-            # 创建预约表（如果不存在）
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS book_reservations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    book_id INTEGER NOT NULL,
-                    reader_id INTEGER NOT NULL,
-                    reserve_date TEXT NOT NULL,
-                    valid_days INTEGER DEFAULT 7,
-                    expiry_date TEXT,
-                    source TEXT DEFAULT 'manual',
-                    remark TEXT DEFAULT '',
-                    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'notified', 'fulfilled', 'cancelled', 'expired')),
-                    notified INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-                    FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE,
-                    FOREIGN KEY(reader_id) REFERENCES users(id) ON DELETE CASCADE
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_reservations_book ON book_reservations(book_id);
-                CREATE INDEX IF NOT EXISTS idx_reservations_reader ON book_reservations(reader_id);
-                CREATE INDEX IF NOT EXISTS idx_reservations_status ON book_reservations(status);
-                CREATE INDEX IF NOT EXISTS idx_reservations_expiry ON book_reservations(expiry_date);
-                """
-            )
-            
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS users (

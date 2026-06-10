@@ -109,7 +109,12 @@ function switchView(viewName) {
   if (viewName === 'readers') loadReaders();
   if (viewName === 'records') { loadBorrowOptions(); loadRecords(); }
   if (viewName === 'reservations') loadReservations();
-  if (viewName === 'reports') { loadReportView(); loadRecommendations(); }
+  if (viewName === 'reports') { 
+    loadReportView(); 
+    loadRecommendations(); 
+    // 初始化报告页面事件监听
+    initReportPageEvents();
+  }
   if (viewName === 'overdue') loadOverdue();
   if (viewName === 'announcements') loadAnnouncements();
   if (viewName === 'audit') loadAuditLogs();
@@ -1197,120 +1202,852 @@ async function notifyReminder(recordId) {
 
 async function loadRecommendations() {
   try {
+    // 检查当前用户是否为读者
+    if (state.user.role !== 'reader') {
+      // 管理员/馆员查看时，显示提示
+      document.querySelectorAll('.rec-list').forEach(el => {
+        el.innerHTML = '<p style="color: #94a3b8; font-size: 13px; padding: 20px; text-align: center;">💡 仅读者可查看个性化推荐</p>';
+      });
+      return;
+    }
+    
     const recs = await api('/api/recommendations');
     
-    renderRecommendation('recCategory', recs.by_category);
-    renderRecommendation('recPopular', recs.by_popular);
-    renderRecommendation('recRating', recs.by_rating);
-    renderRecommendation('recDepartment', recs.by_department);
+    renderRecommendation('recCategory', recs.by_category, '根据您常借阅的图书分类推荐');
+    renderRecommendation('recPopular', recs.by_popular, '热门借阅榜推荐');
+    renderRecommendation('recRating', recs.by_rating, '高分书评推荐');
+    renderRecommendation('recDepartment', recs.by_department, '根据您的专业推荐');
   } catch (e) {
     console.error('Failed to load recommendations:', e);
+    toast('加载推荐失败', 'error');
   }
 }
 
-function renderRecommendation(containerId, items) {
+function renderRecommendation(containerId, items, reason) {
   const container = $(containerId);
+  
   if (!items || items.length === 0) {
-    container.innerHTML = '<p style="color: #94a3b8; font-size: 13px;">暂无推荐数据</p>';
+    container.innerHTML = `
+      <div style="text-align: center; padding: 30px; color: #999;">
+        <div style="font-size: 32px; margin-bottom: 10px;">📚</div>
+        <p>暂无阅读数据，可先借阅图书获取个性化推荐</p>
+        <button class="primary" style="margin-top: 12px;" onclick="switchView('books')">浏览热门图书</button>
+      </div>
+    `;
     return;
   }
+  
   container.innerHTML = items.map(book => `
     <div class="rec-item">
       <strong>${escapeHtml(book.title)}</strong>
-      <div>${escapeHtml(book.author)} · ${escapeHtml(book.category)}</div>
+      <div class="rec-author">${escapeHtml(book.author)} · ${escapeHtml(book.category)}</div>
       <div style="color: #94a3b8; font-size: 12px;">ISBN: ${escapeHtml(book.isbn)}</div>
+      <div class="rec-reason">${reason}</div>
+      <div class="rec-actions">
+        <button class="primary small" onclick="borrowRecommendedBook(${book.id}, '${escapeHtml(book.title)}')">借阅</button>
+        <button class="ghost small" onclick="reserveRecommendedBook(${book.id}, '${escapeHtml(book.title)}')">预约</button>
+      </div>
     </div>
   `).join('');
 }
 
+// 借阅推荐图书
+async function borrowRecommendedBook(bookId, bookTitle) {
+  switchView('records');
+  setTimeout(() => { 
+    $('borrowBook').value = bookId; 
+    toast(`已选择《${bookTitle}》，请确认借阅信息`, 'success');
+  }, 100);
+}
+
+// 预约推荐图书
+async function reserveRecommendedBook(bookId, bookTitle) {
+  if (!confirm(`确认预约《${bookTitle}》？当图书归还时，您将收到通知。`)) return;
+  try {
+    await api('/api/reservations', { 
+      method: 'POST', 
+      body: JSON.stringify({ book_id: bookId, reader_id: state.user.id }) 
+    });
+    toast('预约成功！当图书归还时您将收到通知', 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
 async function loadReportReaders() {
   const data = await api('/api/readers?page=1&page_size=100');
-  $('reportReader').innerHTML = '<option value="">请选择读者</option>' + data.items.map(r => `<option value="${r.id}">${escapeHtml(r.full_name)} / ${escapeHtml(r.username)}</option>`).join('');
+  $('reportReader').innerHTML = '<option value="">请选择读者</option>' + 
+    data.items.map(r => `<option value="${r.id}">${escapeHtml(r.full_name)}（${escapeHtml(r.username)}${r.department ? '/' + escapeHtml(r.department) : ''}）</option>`).join('');
+}
+
+// 初始化报告页面事件监听
+let reportEventsInitialized = false;
+
+function initReportPageEvents() {
+  // 防止重复绑定事件
+  if (reportEventsInitialized) {
+    console.log('Report events already initialized');
+    return;
+  }
+  
+  try {
+    console.log('Initializing report page events...');
+    
+    // 检查所有必需的元素是否存在
+    const requiredElements = [
+      'reportReader', 'reportPeriod', 'generateReportBtn', 
+      'downloadReportCsvBtn', 'downloadReportPdfBtn'
+    ];
+    
+    for (const id of requiredElements) {
+      const el = $(id);
+      if (!el) {
+        console.error(`Element not found: ${id}`);
+        throw new Error(`Required element '${id}' not found in DOM`);
+      }
+    }
+    
+    // 读者选择变化时更新按钮状态
+    $('reportReader').addEventListener('change', function() {
+      updateReportButtonStates();
+    });
+    
+    // 报告周期变化时显示/隐藏自定义日期范围
+    $('reportPeriod').addEventListener('change', function() {
+      const customRanges = document.querySelectorAll('.custom-date-range');
+      if (this.value === 'custom') {
+        customRanges.forEach(el => el.classList.remove('hidden'));
+      } else {
+        customRanges.forEach(el => el.classList.add('hidden'));
+      }
+    });
+    
+    // 生成报告按钮
+    $('generateReportBtn').addEventListener('click', async function() {
+      await generateReportWithLoading();
+    });
+    
+    // 快捷生成报告按钮
+    const quickBtn = $('quickGenerateReportBtn');
+    if (quickBtn) {
+      quickBtn.addEventListener('click', function() {
+        $('reportReader').focus();
+        toast('请先选择读者，然后点击「生成报告」');
+      });
+    }
+    
+    // 下载CSV按钮 - 使用onclick确保能捕获点击
+    $('downloadReportCsvBtn').onclick = function(e) {
+      console.log('CSV button clicked');
+      console.log('Current report state:', state.currentReport);
+      
+      if (!state.currentReport) {
+        toast('请先生成报告', 'error');
+        return;
+      }
+      
+      try {
+        downloadReportCSV();
+      } catch (err) {
+        console.error('CSV export error:', err);
+        toast('导出失败: ' + err.message, 'error');
+      }
+    };
+    
+    // 下载PDF按钮
+    $('downloadReportPdfBtn').onclick = function(e) {
+      console.log('PDF button clicked');
+      console.log('Current report state:', state.currentReport);
+      
+      if (!state.currentReport) {
+        toast('请先生成报告', 'error');
+        return;
+      }
+      
+      try {
+        downloadReportPDF();
+      } catch (err) {
+        console.error('PDF export error:', err);
+        toast('导出失败: ' + err.message, 'error');
+      }
+    };
+    
+    reportEventsInitialized = true;
+    console.log('Report page events initialized successfully');
+  } catch (error) {
+    console.error('Failed to initialize report page events:', error);
+    // 重置标志，允许重试
+    reportEventsInitialized = false;
+  }
+}
+
+// 更新按钮状态
+function updateReportButtonStates() {
+  const readerId = $('reportReader').value;
+  const hasReport = state.currentReport !== null;
+  
+  // 生成报告按钮：未选择读者时置灰
+  if (!readerId) {
+    $('generateReportBtn').disabled = true;
+    $('generateReportBtn').title = '请先选择读者';
+  } else {
+    $('generateReportBtn').disabled = false;
+    $('generateReportBtn').title = '点击生成读书报告';
+  }
+  
+  // 下载按钮：仅当报告生成成功后可点击
+  // 不使用disabled，改用onclick中判断
+  $('downloadReportCsvBtn').title = hasReport ? '下载CSV格式报告' : '请先生成报告';
+  $('downloadReportCsvBtn').style.opacity = hasReport ? '1' : '0.5';
+  $('downloadReportCsvBtn').style.cursor = hasReport ? 'pointer' : 'not-allowed';
+  
+  $('downloadReportPdfBtn').title = hasReport ? '下载PDF格式报告' : '请先生成报告';
+  $('downloadReportPdfBtn').style.opacity = hasReport ? '1' : '0.5';
+  $('downloadReportPdfBtn').style.cursor = hasReport ? 'pointer' : 'not-allowed';
+}
+
+// 带加载动画的报告生成
+async function generateReportWithLoading() {
+  const readerId = $('reportReader').value;
+  if (!readerId) {
+    toast('请先选择读者', 'error');
+    return;
+  }
+  
+  const btn = $('generateReportBtn');
+  const originalText = '生成报告';
+  
+  try {
+    // 显示加载状态
+    btn.disabled = true;
+    btn.textContent = '生成中...';
+    
+    let url = '/api/reports/reader';
+    const params = [`reader_id=${readerId}`];
+    
+    // 添加时间范围参数
+    const period = $('reportPeriod').value;
+    if (period !== 'all') {
+      params.push(`period=${period}`);
+      
+      if (period === 'custom') {
+        const startDate = $('reportStartDate').value;
+        const endDate = $('reportEndDate').value;
+        if (startDate) params.push(`start_date=${startDate}`);
+        if (endDate) params.push(`end_date=${endDate}`);
+      }
+    }
+    
+    if (params.length > 0) {
+      url += '?' + params.join('&');
+    }
+    
+    const report = await api(url);
+    state.currentReport = report;
+    state.currentReportPeriod = period; // 保存当前周期用于导出命名
+    renderReport(report);
+    updateReportButtonStates();
+    
+    // 获取读者姓名用于toast
+    const readerSelect = $('reportReader');
+    const readerName = readerSelect.options[readerSelect.selectedIndex]?.text || '该读者';
+    
+    toast(`读者「${readerName}」的读书报告已生成，可在线预览或下载`, 'success');
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    // 恢复按钮状态
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
 }
 
 async function loadReport() {
-  try {
-    let url = '/api/reports/reader';
-    if (state.user.role === 'admin') {
-      const readerId = $('reportReader').value;
-      if (!readerId) return toast('请选择要生成报告的读者', 'error');
-      url += `?reader_id=${readerId}`;
-    }
-    const report = await api(url);
-    state.currentReport = report;
-    renderReport(report);
-  } catch (err) {
-    toast(err.message, 'error');
-  }
+  // 保留旧接口兼容性，但推荐使用 generateReportWithLoading
+  await generateReportWithLoading();
 }
 
 function renderReport(report) {
   const summary = report.summary;
   const rows = report.records;
-  const summaryHtml = `
-    <div class="report-summary">
-      <div><strong>读者：</strong>${escapeHtml(report.reader_name)} / ${escapeHtml(report.reader_username)}</div>
-      <div><strong>院系：</strong>${escapeHtml(report.department)}</div>
-      <div><strong>生成时间：</strong>${escapeHtml(report.generated_at)}</div>
-      <div><strong>总借阅次数：</strong>${summary.total_borrowed}</div>
-      <div><strong>当前借阅：</strong>${summary.currently_borrowed}</div>
-      <div><strong>已逾期：</strong>${summary.overdue}</div>
-      <div><strong>已归还：</strong>${summary.returned}</div>
-      <div><strong>累计阅读天数：</strong>${summary.total_reading_days} 天</div>
-      <div><strong>平均借阅时长：</strong>${summary.average_borrow_duration_days} 天</div>
-      <div><strong>平均归还时长：</strong>${summary.average_return_duration_days} 天</div>
+  
+  // 计算趋势（与上一周期对比）
+  const trendUp = '↑';
+  const trendDown = '↓';
+  
+  // 核心数据卡片
+  const cardsHtml = `
+    <div class="report-summary-cards">
+      <div class="summary-card">
+        <div class="card-label">借阅总次数</div>
+        <div class="card-value">${summary.total_borrowed}</div>
+        <div class="card-trend">${trendUp} 活跃阅读</div>
+      </div>
+      <div class="summary-card">
+        <div class="card-label">阅读总时长</div>
+        <div class="card-value">${summary.total_reading_days}<span style="font-size:16px;color:#666;">天</span></div>
+        <div class="card-trend">累计阅读天数</div>
+      </div>
+      <div class="summary-card">
+        <div class="card-label">平均借阅天数</div>
+        <div class="card-value">${summary.average_borrow_duration_days}<span style="font-size:16px;color:#666;">天</span></div>
+        <div class="card-trend">每次借阅平均时长</div>
+      </div>
+      <div class="summary-card">
+        <div class="card-label">逾期次数</div>
+        <div class="card-value" style="color: ${summary.overdue > 0 ? '#ef4444' : '#10b981'};">${summary.overdue}</div>
+        <div class="card-trend ${summary.overdue > 0 ? 'negative' : ''}">${summary.overdue > 0 ? '需注意逾期情况' : '无逾期记录'}</div>
+      </div>
     </div>
   `;
-  const tableHtml = rows.length ? `
-    <div class="table-wrap"><table><thead><tr><th>ID</th><th>书名</th><th>ISBN</th><th>借出</th><th>应还</th><th>归还</th><th>状态</th><th>借阅天数</th><th>逾期</th></tr></thead><tbody>
-      ${rows.map(item => `<tr><td>${item.id}</td><td>${escapeHtml(item.book_title)}</td><td>${escapeHtml(item.isbn)}</td><td>${item.borrow_date}</td><td>${item.due_date}</td><td>${item.return_date || '-'}</td><td>${statusBadge(item.status)}</td><td>${item.borrow_duration_days}</td><td>${Math.max(item.overdue_days, 0)}</td></tr>`).join('')}
-    </tbody></table></div>
-  ` : '<p>当前读者暂无借阅记录。</p>';
-  $('reportPreview').innerHTML = summaryHtml + tableHtml;
+  
+  // 可视化图表区域
+  const chartsHtml = `
+    <div class="report-charts">
+      <div class="chart-container">
+        <h4>阅读分类占比</h4>
+        <canvas id="reportCategoryChart" height="280"></canvas>
+      </div>
+      <div class="chart-container">
+        <h4>近半年借阅趋势</h4>
+        <canvas id="reportTrendChart" height="280"></canvas>
+      </div>
+    </div>
+  `;
+  
+  // 明细列表
+  const detailsHtml = `
+    <div class="report-details">
+      <h4>详细借阅记录</h4>
+      
+      <div class="detail-section">
+        <h5>已借阅图书清单（共 ${rows.length} 本）</h5>
+        ${rows.length ? `
+          <div class="table-wrap"><table>
+            <thead><tr><th>ID</th><th>书名</th><th>ISBN</th><th>借出</th><th>应还</th><th>归还</th><th>状态</th><th>借阅天数</th><th>逾期</th></tr></thead>
+            <tbody>
+              ${rows.map(item => `<tr>
+                <td>${item.id}</td>
+                <td>${escapeHtml(item.book_title)}</td>
+                <td>${escapeHtml(item.isbn)}</td>
+                <td>${item.borrow_date}</td>
+                <td>${item.due_date}</td>
+                <td>${item.return_date || '-'}</td>
+                <td>${statusBadge(item.status)}</td>
+                <td>${item.borrow_duration_days}</td>
+                <td>${Math.max(item.overdue_days, 0)}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table></div>
+        ` : '<p style="color: #999; padding: 20px;">暂无借阅记录</p>'}
+      </div>
+      
+      <div class="detail-section">
+        <h5>逾期记录汇总</h5>
+        ${summary.overdue > 0 ? `
+          <p style="padding: 12px; background: rgba(239, 68, 68, 0.1); border-radius: 8px; color: #dc2626;">
+            当前有 <strong>${summary.overdue}</strong> 条逾期记录，请及时归还图书以避免更多罚金。
+          </p>
+        ` : '<p style="color: #10b981; padding: 12px; background: rgba(16, 185, 129, 0.1); border-radius: 8px;">无逾期记录，保持良好的借阅习惯！</p>'}
+      </div>
+      
+      <div class="detail-section">
+        <h5>热门借阅分类</h5>
+        <div id="reportCategoryStats" style="padding: 12px; background: var(--muted); border-radius: 8px;">
+          <!-- 动态生成分类统计 -->
+        </div>
+      </div>
+    </div>
+  `;
+  
+  $('reportPreview').innerHTML = cardsHtml + chartsHtml + detailsHtml;
+  
+  // 绘制图表
+  setTimeout(() => {
+    drawReportCharts(rows);
+    generateCategoryStats(rows);
+  }, 100);
 }
 
-function downloadReport() {
-  if (!state.currentReport) return toast('请先生成报告再下载', 'error');
-  const report = state.currentReport;
-  const csvEscape = (value) => {
-    const text = String(value ?? '');
-    if (/[",\r\n]/.test(text)) {
-      return `"${text.replace(/"/g, '""')}"`;
+// 绘制报告图表
+function drawReportCharts(rows) {
+  // 1. 阅读分类占比饼图
+  const categoryCount = {};
+  rows.forEach(item => {
+    const category = item.category || '未分类';
+    categoryCount[category] = (categoryCount[category] || 0) + 1;
+  });
+  
+  const categoryData = Object.entries(categoryCount).map(([name, value]) => ({ name, value }));
+  if (categoryData.length > 0) {
+    drawPie('reportCategoryChart', categoryData);
+  }
+  
+  // 2. 近半年借阅趋势柱状图
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  
+  const monthlyCount = {};
+  for (let i = 0; i < 6; i++) {
+    const d = new Date();
+    d.setMonth(d.getMonth() - i);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    monthlyCount[key] = 0;
+  }
+  
+  rows.forEach(item => {
+    const borrowDate = new Date(item.borrow_date);
+    if (borrowDate >= sixMonthsAgo) {
+      const key = `${borrowDate.getFullYear()}-${String(borrowDate.getMonth() + 1).padStart(2, '0')}`;
+      if (monthlyCount.hasOwnProperty(key)) {
+        monthlyCount[key]++;
+      }
     }
-    return text;
+  });
+  
+  const trendData = Object.entries(monthlyCount)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, count]) => ({ day, count }));
+  
+  if (trendData.length > 0) {
+    drawBar('reportTrendChart', trendData);
+  }
+}
+
+// 生成分类统计
+function generateCategoryStats(rows) {
+  const categoryCount = {};
+  rows.forEach(item => {
+    const category = item.category || '未分类';
+    categoryCount[category] = (categoryCount[category] || 0) + 1;
+  });
+  
+  const sorted = Object.entries(categoryCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5); // Top 5
+  
+  const container = $('reportCategoryStats');
+  if (sorted.length === 0) {
+    container.innerHTML = '<p style="color: #999;">暂无数据</p>';
+    return;
+  }
+  
+  container.innerHTML = sorted.map(([cat, count], idx) => `
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; ${idx < sorted.length - 1 ? 'border-bottom: 1px dashed var(--border);' : ''}">
+      <span style="font-weight: 500;">${idx + 1}. ${escapeHtml(cat)}</span>
+      <span style="color: var(--accent); font-weight: 600;">${count} 本</span>
+    </div>
+  `).join('');
+}
+
+function downloadReportCSV() {
+  console.log('downloadReportCSV called');
+  console.log('state.currentReport:', state.currentReport);
+  
+  if (!state.currentReport) {
+    toast('请先生成报告再下载', 'error');
+    return;
+  }
+  
+  try {
+    const report = state.currentReport;
+    const summary = report.summary;
+    const rows = report.records;
+    const period = state.currentReportPeriod || 'all';
+    
+    // 获取周期中文名称
+    const periodNames = {
+      'all': '全部时间',
+      '3months': '近3个月',
+      '6months': '近半年',
+      '1year': '近1年',
+      'custom': '自定义'
+    };
+    const periodName = periodNames[period] || '全部时间';
+    
+    const csvEscape = (value) => {
+      const text = String(value ?? '');
+      if (/[",\r\n]/.test(text)) {
+        return `"${text.replace(/"/g, '""')}"`;
+      }
+      return text;
+    };
+
+    // 构建CSV内容
+    const lines = [];
+    
+    // 标题行
+    lines.push(['读书报告']);
+    lines.push([]);
+    
+    // 基本信息
+    lines.push(['读者信息']);
+    lines.push(['读者姓名', report.reader_name]);
+    lines.push(['用户名', report.reader_username]);
+    lines.push(['院系', report.department]);
+    lines.push(['报告周期', periodName]);
+    lines.push(['生成时间', report.generated_at]);
+    lines.push([]);
+    
+    // 统计数据
+    lines.push(['统计汇总']);
+    lines.push(['总借阅次数', summary.total_borrowed]);
+    lines.push(['当前借阅', summary.currently_borrowed]);
+    lines.push(['已逾期', summary.overdue]);
+    lines.push(['已归还', summary.returned]);
+    lines.push(['累计阅读天数', `${summary.total_reading_days} 天`]);
+    lines.push(['平均借阅时长', `${summary.average_borrow_duration_days} 天`]);
+    lines.push(['平均归还时长', `${summary.average_return_duration_days} 天`]);
+    lines.push([]);
+    
+    // 分类统计
+    const categoryCount = {};
+    rows.forEach(item => {
+      const category = item.category || '未分类';
+      categoryCount[category] = (categoryCount[category] || 0) + 1;
+    });
+    
+    if (Object.keys(categoryCount).length > 0) {
+      lines.push(['阅读分类统计']);
+      lines.push(['分类', '数量']);
+      Object.entries(categoryCount)
+        .sort((a, b) => b[1] - a[1])
+        .forEach(([cat, count]) => {
+          lines.push([cat, count]);
+        });
+      lines.push([]);
+    }
+    
+    // 借阅明细
+    lines.push(['借阅明细']);
+    lines.push(['记录ID', '书名', 'ISBN', '作者', '分类', '借出日期', '应还日期', '归还日期', '状态', '借阅天数', '逾期天数']);
+    
+    rows.forEach(item => {
+      lines.push([
+        item.id,
+        item.book_title,
+        item.isbn,
+        item.author || '',
+        item.category || '',
+        item.borrow_date,
+        item.due_date,
+        item.return_date || '',
+        item.status === 'borrowed' ? '借阅中' : item.status === 'returned' ? '已归还' : '已逾期',
+        item.borrow_duration_days,
+        Math.max(item.overdue_days, 0)
+      ]);
+    });
+
+    // 转换为CSV格式
+    const csvContent = lines.map(row => row.map(csvEscape).join(',')).join('\r\n');
+    console.log('CSV content length:', csvContent.length);
+
+    // 自动命名：[读者姓名]_[周期]读书报告.csv
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+    const filename = `${report.reader_name}_${periodName}_读书报告_${dateStr}.csv`;
+    
+    console.log('Downloading file:', filename);
+    
+    // 使用浏览器原生下载方法
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    toast(`报告已下载：${filename}`, 'success');
+  } catch (err) {
+    console.error('CSV export error:', err);
+    toast('导出失败: ' + err.message, 'error');
+    throw err;
+  }
+}
+
+// PDF导出功能（使用浏览器打印功能模拟）
+function downloadReportPDF() {
+  console.log('downloadReportPDF called');
+  console.log('state.currentReport:', state.currentReport);
+  
+  if (!state.currentReport) {
+    toast('请先生成报告再下载', 'error');
+    return;
+  }
+  
+  toast('正在准备PDF导出...', 'info');
+  
+  // 创建打印窗口
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    toast('请允许弹出窗口以导出PDF', 'error');
+    return;
+  }
+  
+  const report = state.currentReport;
+  const summary = report.summary;
+  const rows = report.records;
+  const period = state.currentReportPeriod || 'all';
+  
+  // 获取周期中文名称
+  const periodNames = {
+    'all': '全部时间',
+    '3months': '近3个月',
+    '6months': '近半年',
+    '1year': '近1年',
+    'custom': '自定义'
   };
-
-  const summaryRows = [
-    ['读者', `${report.reader_name} / ${report.reader_username}`],
-    ['院系', report.department],
-    ['生成时间', report.generated_at],
-    ['总借阅次数', report.summary.total_borrowed],
-    ['当前借阅', report.summary.currently_borrowed],
-    ['已逾期', report.summary.overdue],
-    ['已归还', report.summary.returned],
-    ['累计阅读天数', `${report.summary.total_reading_days} 天`],
-    ['平均借阅时长', `${report.summary.average_borrow_duration_days} 天`],
-    ['平均归还时长', `${report.summary.average_return_duration_days} 天`],
-  ];
-
-  const recordHeader = ['记录ID', '书名', 'ISBN', '借出日期', '应还日期', '归还日期', '状态', '借阅天数', '逾期天数'];
-  const recordLines = report.records.map(item => [
-    item.id,
-    item.book_title,
-    item.isbn,
-    item.borrow_date,
-    item.due_date,
-    item.return_date || '-',
-    item.status,
-    item.borrow_duration_days,
-    Math.max(item.overdue_days, 0),
-  ].map(csvEscape).join(','));
-
-  const csvContent = summaryRows.map(row => row.map(csvEscape).join(',')).join('\r\n')
-    + '\r\n\r\n' + recordHeader.map(csvEscape).join(',')
-    + '\r\n' + recordLines.join('\r\n');
-
-  downloadCsv(`读书报告-${report.reader_username || report.reader_name}.csv`, csvContent);
+  const periodName = periodNames[period] || '全部时间';
+  
+  // 计算分类统计
+  const categoryCount = {};
+  rows.forEach(item => {
+    const category = item.category || '未分类';
+    categoryCount[category] = (categoryCount[category] || 0) + 1;
+  });
+  
+  const sortedCategories = Object.entries(categoryCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+  
+  // 生成HTML内容
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>${report.reader_name} - 读书报告</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+          font-family: "Microsoft YaHei", Arial, sans-serif; 
+          padding: 40px; 
+          max-width: 900px; 
+          margin: 0 auto;
+          color: #333;
+          line-height: 1.6;
+        }
+        h1 { 
+          color: #B8860B; 
+          border-bottom: 3px solid #B8860B; 
+          padding-bottom: 15px;
+          margin-bottom: 30px;
+          font-size: 28px;
+        }
+        h2 { 
+          color: #333; 
+          margin-top: 35px;
+          margin-bottom: 20px;
+          font-size: 20px;
+          border-left: 4px solid #B8860B;
+          padding-left: 12px;
+        }
+        h3 {
+          font-size: 16px;
+          margin-bottom: 12px;
+          color: #555;
+        }
+        .info-section { 
+          background: #f8f9fa; 
+          padding: 20px; 
+          border-radius: 8px; 
+          margin-bottom: 25px;
+          border: 1px solid #e9ecef;
+        }
+        .info-section p { 
+          margin: 8px 0; 
+          font-size: 14px;
+        }
+        .info-section strong {
+          color: #555;
+          display: inline-block;
+          min-width: 100px;
+        }
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 15px;
+          margin-bottom: 25px;
+        }
+        .stat-item {
+          background: #fff;
+          border: 1px solid #e9ecef;
+          border-radius: 6px;
+          padding: 15px;
+          text-align: center;
+        }
+        .stat-label {
+          font-size: 13px;
+          color: #666;
+          margin-bottom: 8px;
+        }
+        .stat-value {
+          font-size: 28px;
+          font-weight: bold;
+          color: #B8860B;
+        }
+        table { 
+          width: 100%; 
+          border-collapse: collapse; 
+          margin-top: 15px;
+          font-size: 13px;
+        }
+        th, td { 
+          padding: 10px 8px; 
+          border: 1px solid #dee2e6; 
+          text-align: left;
+        }
+        th { 
+          background: #f8f9fa; 
+          font-weight: bold;
+          color: #495057;
+        }
+        tr:nth-child(even) {
+          background: #f8f9fa;
+        }
+        .badge { 
+          padding: 4px 10px; 
+          border-radius: 4px; 
+          font-size: 12px;
+          display: inline-block;
+        }
+        .badge.borrowed { 
+          background: #dbeafe; 
+          color: #1e40af; 
+        }
+        .badge.returned { 
+          background: #dcfce7; 
+          color: #166534; 
+        }
+        .badge.overdue { 
+          background: #fee2e2; 
+          color: #991b1b; 
+        }
+        .category-list {
+          list-style: none;
+          padding: 0;
+        }
+        .category-list li {
+          padding: 8px 12px;
+          border-bottom: 1px dashed #dee2e6;
+          display: flex;
+          justify-content: space-between;
+        }
+        .category-list li:last-child {
+          border-bottom: none;
+        }
+        .page-break {
+          page-break-before: always;
+        }
+        @media print { 
+          body { padding: 20px; }
+          .no-print { display: none; }
+        }
+      </style>
+    </head>
+    <body>
+      <h1>读书报告</h1>
+      
+      <div class="info-section">
+        <p><strong>读者姓名：</strong>${escapeHtml(report.reader_name)}</p>
+        <p><strong>用户名：</strong>${escapeHtml(report.reader_username)}</p>
+        <p><strong>院系：</strong>${escapeHtml(report.department)}</p>
+        <p><strong>报告周期：</strong>${periodName}</p>
+        <p><strong>生成时间：</strong>${report.generated_at}</p>
+      </div>
+      
+      <h2>阅读统计</h2>
+      <div class="stats-grid">
+        <div class="stat-item">
+          <div class="stat-label">总借阅次数</div>
+          <div class="stat-value">${summary.total_borrowed}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">当前借阅</div>
+          <div class="stat-value">${summary.currently_borrowed}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">已逾期</div>
+          <div class="stat-value" style="color: ${summary.overdue > 0 ? '#ef4444' : '#10b981'};">${summary.overdue}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">已归还</div>
+          <div class="stat-value">${summary.returned}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">累计阅读天数</div>
+          <div class="stat-value">${summary.total_reading_days}<span style="font-size:14px;">天</span></div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">平均借阅时长</div>
+          <div class="stat-value">${summary.average_borrow_duration_days}<span style="font-size:14px;">天</span></div>
+        </div>
+      </div>
+      
+      ${sortedCategories.length > 0 ? `
+        <h2>热门借阅分类</h2>
+        <ul class="category-list">
+          ${sortedCategories.map(([cat, count], idx) => `
+            <li>
+              <span>${idx + 1}. ${escapeHtml(cat)}</span>
+              <strong style="color: #B8860B;">${count} 本</strong>
+            </li>
+          `).join('')}
+        </ul>
+      ` : ''}
+      
+      <div class="page-break"></div>
+      
+      <h2>借阅明细</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>书名</th>
+            <th>作者</th>
+            <th>借出日期</th>
+            <th>应还日期</th>
+            <th>归还日期</th>
+            <th>状态</th>
+            <th>借阅天数</th>
+            <th>逾期天数</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(item => `
+            <tr>
+              <td>${escapeHtml(item.book_title)}</td>
+              <td>${escapeHtml(item.author || '-')}</td>
+              <td>${item.borrow_date}</td>
+              <td>${item.due_date}</td>
+              <td>${item.return_date || '-'}</td>
+              <td><span class="badge ${item.status}">${item.status === 'borrowed' ? '借阅中' : item.status === 'returned' ? '已归还' : '已逾期'}</span></td>
+              <td>${item.borrow_duration_days}</td>
+              <td>${Math.max(item.overdue_days, 0)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      
+      <div class="no-print" style="margin-top: 30px; text-align: center;">
+        <button onclick="window.print()" style="padding: 12px 30px; background: #B8860B; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">打印 / 另存为PDF</button>
+      </div>
+      
+      <script>
+        window.onload = function() { 
+          setTimeout(function() {
+            window.print();
+          }, 500);
+        }
+      </script>
+    </body>
+    </html>
+  `;
+  
+  printWindow.document.write(htmlContent);
+  printWindow.document.close();
 }
 
 function downloadCsv(filename, text) {
@@ -1458,22 +2195,8 @@ $('readerSearchBtn').addEventListener('click', () => loadReaders());
 $('exportReadersBtn').addEventListener('click', exportReaders);
 $('importReadersBtn').addEventListener('click', () => $('importReadersFile').click());
 $('importReadersFile').addEventListener('change', handleImportReaders);
-$('readerForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const id = $('readerId').value;
-  const payload = {
-    username: $('readerUsername').value, password: $('readerPassword').value, full_name: $('readerFullName').value,
-    status: $('readerStatus').value, phone: $('readerPhone').value, email: $('readerEmail').value, department: $('readerDepartment').value,
-  };
-  if (!id && !payload.password) return toast('新增读者密码不能为空', 'error');
-  try {
-    const method = id ? 'PUT' : 'POST';
-    const url = id ? `/api/readers/${id}` : '/api/readers';
-    await api(url, { method, body: JSON.stringify(payload) });
-    toast(id ? '更新成功' : '新增成功', 'success');
-    resetReaderForm(); loadReaders(); loadBorrowOptions();
-  } catch (e) { toast(e.message, 'error'); }
-});
+// 注意：readerForm已改为弹窗形式(readerFormInner)，使用onclick直接调用submitReaderForm()
+// $('readerForm').addEventListener('submit', ...); // 已移除
 $('recordSearchBtn').addEventListener('click', () => { state.recordPage = 1; loadRecords(); });
 $('recordPrev').addEventListener('click', () => { if (state.recordPage > 1) { state.recordPage--; loadRecords(); } });
 $('recordNext').addEventListener('click', () => { state.recordPage++; loadRecords(); });
@@ -1481,13 +2204,8 @@ $('reservationSearchBtn').addEventListener('click', () => { state.reservationPag
 $('reservationStatus').addEventListener('change', () => { state.reservationPage = 1; loadReservations(); });
 $('reservationPrev').addEventListener('click', () => { if (state.reservationPage > 1) { state.reservationPage--; loadReservations(); } });
 $('reservationNext').addEventListener('click', () => { state.reservationPage++; loadReservations(); });
-$('borrowForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const payload = { book_id: Number($('borrowBook').value), borrow_days: Number($('borrowDays').value), remark: $('borrowRemark').value };
-  if (state.user.role === 'admin') payload.reader_id = Number($('borrowReader').value);
-  try { await api('/api/borrow-records', { method: 'POST', body: JSON.stringify(payload) }); toast('借书成功', 'success'); loadRecords(); loadDashboard(); }
-  catch (e) { toast(e.message, 'error'); }
-});
+// 注意：borrowForm已改为弹窗形式(borrowFormInner)，使用onclick直接调用submitBorrowForm()
+// $('borrowForm').addEventListener('submit', ...); // 已移除
 $('generateReportBtn').addEventListener('click', loadReport);
 $('downloadReportBtn').addEventListener('click', downloadReport);
 $('refreshOverdueBtn').addEventListener('click', () => { overduePage = 1; loadOverdue(); });
@@ -1771,3 +2489,233 @@ if ($('applyCustomDate')) {
 
 // Initialize on page load
 window.addEventListener('DOMContentLoaded', initAuth);
+
+// ========== 读者管理弹窗控制 ==========
+function openReaderFormModal(reader = null) {
+  $('readerFormTitle').textContent = reader ? '编辑读者' : '新增读者';
+  $('readerId').value = reader ? reader.id : '';
+  $('readerUsername').value = reader ? reader.username : '';
+  $('readerPassword').value = '';
+  $('readerConfirmPassword').value = '';
+  $('readerFullName').value = reader ? reader.full_name : '';
+  $('readerPhone').value = reader ? reader.phone : '';
+  $('readerEmail').value = reader ? reader.email || '' : '';
+  $('readerDepartment').value = reader ? reader.department || '' : '';
+  $('readerDepartmentCustom').value = '';
+  $('readerStatus').value = reader ? reader.status : 'active';
+  
+  // 清空验证错误
+  document.querySelectorAll('#readerFormModal .validation-error').forEach(el => {
+    el.textContent = '';
+    el.style.display = 'none';
+  });
+  
+  $('readerFormModal').classList.remove('hidden');
+}
+
+function closeReaderFormModal() {
+  $('readerFormModal').classList.add('hidden');
+}
+
+async function submitReaderForm() {
+  const id = $('readerId').value;
+  const username = $('readerUsername').value;
+  const password = $('readerPassword').value;
+  const confirmPassword = $('readerConfirmPassword').value;
+  const fullName = $('readerFullName').value;
+  const phone = $('readerPhone').value;
+  const email = $('readerEmail').value;
+  const department = $('readerDepartment').value || $('readerDepartmentCustom').value;
+  const status = $('readerStatus').value;
+  
+  // 表单校验
+  if (!username) {
+    toast('请输入用户名', 'error');
+    return;
+  }
+  if (!id && !password) {
+    toast('请输入密码', 'error');
+    return;
+  }
+  if (password && password !== confirmPassword) {
+    toast('两次输入的密码不一致', 'error');
+    return;
+  }
+  if (password && password.length < 8) {
+    toast('密码至少8位', 'error');
+    return;
+  }
+  if (!fullName) {
+    toast('请输入姓名', 'error');
+    return;
+  }
+  if (!phone) {
+    toast('请输入手机号', 'error');
+    return;
+  }
+  if (!/^1[3-9]\d{9}$/.test(phone)) {
+    toast('请输入有效的11位手机号', 'error');
+    return;
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    toast('请输入有效的邮箱地址', 'error');
+    return;
+  }
+  
+  try {
+    const payload = {
+      username,
+      full_name: fullName,
+      phone,
+      email: email || null,
+      department: department || null,
+      status
+    };
+    
+    if (id) {
+      // 编辑读者
+      if (password) {
+        payload.password = password;
+      }
+      await api(`/api/readers/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      toast(`读者「${fullName}」更新成功`, 'success');
+    } else {
+      // 新增读者
+      payload.password = password;
+      await api('/api/readers', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      toast(`读者「${fullName}」新增成功`, 'success');
+    }
+    
+    closeReaderFormModal();
+    loadReaders();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+// 点击遮罩层关闭弹窗
+$('readerFormModal')?.addEventListener('click', function(e) {
+  if (e.target === this) {
+    closeReaderFormModal();
+  }
+});
+
+// ========== 借书登记弹窗控制 ==========
+function openBorrowFormModal() {
+  $('borrowOutDate').value = new Date().toISOString().split('T')[0];
+  $('borrowDays').value = '30';
+  $('borrowDueDate').value = '';
+  $('borrowRemarkType').value = '';
+  $('borrowRemark').value = '';
+  
+  // 加载图书和读者下拉框
+  loadBorrowOptions();
+  calculateDueDate();
+  
+  $('borrowFormModal').classList.remove('hidden');
+}
+
+function closeBorrowFormModal() {
+  $('borrowFormModal').classList.add('hidden');
+}
+
+function calculateDueDate() {
+  const outDate = $('borrowOutDate').value;
+  const days = parseInt($('borrowDays').value) || 30;
+  
+  if (outDate) {
+    const dueDate = new Date(outDate);
+    dueDate.setDate(dueDate.getDate() + days);
+    const year = dueDate.getFullYear();
+    const month = String(dueDate.getMonth() + 1).padStart(2, '0');
+    const day = String(dueDate.getDate()).padStart(2, '0');
+    $('borrowDueDate').value = `${year}-${month}-${day}`;
+  } else {
+    $('borrowDueDate').value = '';
+  }
+}
+
+async function submitBorrowForm() {
+  const bookId = $('borrowBook').value;
+  const readerId = $('borrowReader').value;
+  const outDate = $('borrowOutDate').value;
+  const days = parseInt($('borrowDays').value);
+  const dueDate = $('borrowDueDate').value;
+  const remarkType = $('borrowRemarkType').value;
+  const remark = $('borrowRemark').value;
+  
+  // 表单校验
+  if (!bookId) {
+    toast('请选择借阅的图书', 'error');
+    return;
+  }
+  if (!readerId) {
+    toast('请选择读者', 'error');
+    return;
+  }
+  if (!outDate) {
+    toast('请选择借出日期', 'error');
+    return;
+  }
+  if (days > 30) {
+    toast('最长借阅天数为30天', 'error');
+    return;
+  }
+  
+  // 组合备注
+  let fullRemark = remark;
+  if (remarkType) {
+    const typeMap = { teacher: '教师借阅', holiday: '学生假期借阅' };
+    fullRemark = remark ? `${typeMap[remarkType]} - ${remark}` : typeMap[remarkType];
+  }
+  
+  try {
+    await api('/api/borrow-records', {
+      method: 'POST',
+      body: JSON.stringify({
+        book_id: parseInt(bookId),
+        reader_id: parseInt(readerId),
+        borrow_date: outDate,
+        due_date: dueDate,
+        remark: fullRemark || null
+      })
+    });
+    
+    // 获取图书和读者信息用于提示
+    const bookSelect = $('borrowBook');
+    const readerSelect = $('borrowReader');
+    const bookTitle = bookSelect.options[bookSelect.selectedIndex]?.text.split('(')[0] || '图书';
+    const readerName = readerSelect.options[readerSelect.selectedIndex]?.text.split('(')[0] || '读者';
+    
+    toast(`《${bookTitle}》已成功借给读者「${readerName}」，应还日期为 ${dueDate}`, 'success');
+    closeBorrowFormModal();
+    loadRecords();
+    loadDashboard(); // 刷新仪表盘
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+// 监听借出日期和借阅天数变化
+$('borrowDays')?.addEventListener('change', calculateDueDate);
+$('borrowOutDate')?.addEventListener('change', calculateDueDate);
+
+// 点击遮罩层关闭弹窗
+$('borrowFormModal')?.addEventListener('click', function(e) {
+  if (e.target === this) {
+    closeBorrowFormModal();
+  }
+});
+
+// ========== 事件监听器 ==========
+// 读者管理按钮
+$('addReaderBtn')?.addEventListener('click', () => openReaderFormModal());
+
+// 借书登记按钮
+$('openBorrowFormBtn')?.addEventListener('click', openBorrowFormModal);

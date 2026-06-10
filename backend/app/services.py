@@ -529,10 +529,9 @@ class BorrowService:
         
         return self.get_record(record_id, current_user)
 
-    def create_reservation(self, data, current_user: Dict[str, Any]) -> Dict[str, Any]:
+    def create_reservation(self, book_id: int, reader_id: int, current_user: Dict[str, Any]) -> Dict[str, Any]:
         """创建预约"""
         # 确定读者ID
-        reader_id = data.reader_id
         if current_user["role"] == "reader":
             reader_id = current_user["id"]
         if not reader_id:
@@ -546,69 +545,28 @@ class BorrowService:
             raise HTTPException(status_code=400, detail="该读者账号已冻结，不能预约。")
         
         # 检查图书是否存在
-        book = db_manager.fetch_one("SELECT * FROM books WHERE id = ?", (data.book_id,))
+        book = db_manager.fetch_one("SELECT * FROM books WHERE id = ?", (book_id,))
         if not book:
             raise HTTPException(status_code=404, detail="图书不存在。")
         
+        # 如果图书有库存，直接借阅，不需要预约
+        if book["available_count"] > 0:
+            raise HTTPException(status_code=400, detail="该图书当前有库存，可直接借阅，无需预约。")
+        
         # 检查是否已经预约
         existing = db_manager.fetch_one(
-            "SELECT id FROM book_reservations WHERE book_id = ? AND reader_id = ? AND status IN ('pending', 'notified')",
-            (data.book_id, reader_id)
+            "SELECT id FROM book_reservations WHERE book_id = ? AND reader_id = ? AND status = 'pending'",
+            (book_id, reader_id)
         )
         if existing:
-            raise HTTPException(status_code=400, detail="该读者已经预约了这本图书且尚未取书或取消。")
-        
-        # 计算到期时间
-        from datetime import datetime, timedelta
-        reserve_date = datetime.strptime(data.reserve_date, '%Y-%m-%d').date()
-        expiry_date = reserve_date + timedelta(days=data.valid_days)
+            raise HTTPException(status_code=400, detail="您已经预约了这本图书。")
         
         # 创建预约记录
         cursor = db_manager.execute(
-            """INSERT INTO book_reservations(book_id, reader_id, reserve_date, valid_days, expiry_date, source, remark, status, notified) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0)""",
-            (data.book_id, reader_id, data.reserve_date, data.valid_days, expiry_date.isoformat(), data.source, data.remark or "")
+            "INSERT INTO book_reservations(book_id, reader_id, reserve_date, status, notified) VALUES (?, ?, ?, 'pending', 0)",
+            (book_id, reader_id, date.today().isoformat())
         )
         reservation_id = cursor.lastrowid
-        
-        return self.get_reservation(reservation_id)
-
-    def update_reservation(self, reservation_id: int, data, current_user: Dict[str, Any]) -> Dict[str, Any]:
-        """更新预约"""
-        reservation = self.get_reservation(reservation_id)
-        if current_user["role"] == "reader" and reservation["reader_id"] != current_user["id"]:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能修改自己的预约。")
-        if reservation["status"] not in ["pending", "notified"]:
-            raise HTTPException(status_code=400, detail="该预约状态不允许修改。")
-        
-        update_fields = []
-        params = []
-        
-        if data.valid_days is not None:
-            # 重新计算到期时间
-            from datetime import datetime, timedelta
-            reserve_date = datetime.strptime(reservation["reserve_date"], '%Y-%m-%d').date()
-            expiry_date = reserve_date + timedelta(days=data.valid_days)
-            update_fields.append("valid_days = ?")
-            params.append(data.valid_days)
-            update_fields.append("expiry_date = ?")
-            params.append(expiry_date.isoformat())
-        
-        if data.expiry_date is not None:
-            update_fields.append("expiry_date = ?")
-            params.append(data.expiry_date)
-        
-        if data.remark is not None:
-            update_fields.append("remark = ?")
-            params.append(data.remark)
-        
-        if data.source is not None:
-            update_fields.append("source = ?")
-            params.append(data.source)
-        
-        if update_fields:
-            params.append(reservation_id)
-            db_manager.execute(f"UPDATE book_reservations SET {', '.join(update_fields)} WHERE id = ?", tuple(params))
         
         return self.get_reservation(reservation_id)
 
@@ -625,7 +583,7 @@ class BorrowService:
             raise HTTPException(status_code=404, detail="预约记录不存在。")
         return row
 
-    def list_reservations(self, current_user: Dict[str, Any], status_filter: str = "", keyword: str = "", page: int = 1, page_size: int = 10, start_date: str = "", end_date: str = "") -> Dict[str, Any]:
+    def list_reservations(self, current_user: Dict[str, Any], status_filter: str = "", keyword: str = "", page: int = 1, page_size: int = 10) -> Dict[str, Any]:
         """列出预约记录"""
         page, page_size, offset = paginate(page, page_size)
         conditions: List[str] = []
@@ -641,12 +599,6 @@ class BorrowService:
             conditions.append("(b.title LIKE ? OR u.username LIKE ? OR u.full_name LIKE ?)")
             like = normalize_like(keyword)
             params.extend([like, like, like])
-        if start_date:
-            conditions.append("r.reserve_date >= ?")
-            params.append(start_date)
-        if end_date:
-            conditions.append("r.reserve_date <= ?")
-            params.append(end_date)
         
         where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
         total = db_manager.fetch_one(f"""
@@ -812,80 +764,6 @@ class ExportService:
             conditions.append("reader_id = ?")
             params.append(current_user["id"])
         where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
-        rows = db_manager.fetch_all(
-            f"SELECT id, book_title, isbn, reader_name, reader_username, department, borrow_date, due_date, return_date, status FROM v_borrow_detail{where_sql} ORDER BY id",
-            tuple(params)
-        )
-        return self.to_csv(rows)
-
-    def export_reservations(self, status_filter: str = "", keyword: str = "", start_date: str = "", end_date: str = "") -> str:
-        """导出预约记录为CSV"""
-        conditions: List[str] = []
-        params: List[Any] = []
-        
-        if status_filter.strip():
-            conditions.append("r.status = ?")
-            params.append(status_filter.strip())
-        if keyword.strip():
-            conditions.append("(b.title LIKE ? OR u.username LIKE ? OR u.full_name LIKE ?)")
-            like = normalize_like(keyword)
-            params.extend([like, like, like])
-        if start_date:
-            conditions.append("r.reserve_date >= ?")
-            params.append(start_date)
-        if end_date:
-            conditions.append("r.reserve_date <= ?")
-            params.append(end_date)
-        
-        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
-        
-        rows = db_manager.fetch_all(f"""
-            SELECT 
-                r.id,
-                b.title AS book_title,
-                b.isbn,
-                u.full_name AS reader_name,
-                u.username,
-                u.department,
-                r.reserve_date,
-                r.expiry_date,
-                r.status,
-                r.remark
-            FROM book_reservations r
-            JOIN books b ON r.book_id = b.id
-            JOIN users u ON r.reader_id = u.id
-            {where_sql}
-            ORDER BY r.id
-        """, tuple(params))
-        
-        # 状态映射
-        status_map = {
-            'pending': '待取书',
-            'notified': '已通知',
-            'fulfilled': '已取书',
-            'cancelled': '已取消',
-            'expired': '已过期'
-        }
-        
-        # 转换数据格式
-        formatted_rows = []
-        for row in rows:
-            formatted_rows.append({
-                'ID': row['id'],
-                '图书名称': row['book_title'],
-                'ISBN': row['isbn'] or '',
-                '读者姓名': row['reader_name'],
-                '用户名': row['username'],
-                '院系': row['department'] or '',
-                '预约日期': row['reserve_date'],
-                '到期日期': row['expiry_date'] or '',
-                '状态': status_map.get(row['status'], row['status']),
-                '备注': row['remark'] or ''
-            })
-        
-        return self.to_csv(formatted_rows)
-            params.append(current_user["id"])
-        where_sql = " WHERE " + " AND ".join(conditions) if conditions else ""
         rows = db_manager.fetch_all(f"SELECT * FROM v_borrow_detail{where_sql} ORDER BY id", tuple(params))
         return self.to_csv(rows)
 
@@ -900,19 +778,59 @@ class ReportService:
             raise HTTPException(status_code=400, detail="管理员请指定 reader_id。")
         return reader_service.get_reader(reader_id)
 
-    def generate_reader_report(self, current_user: Dict[str, Any], reader_id: Optional[int] = None) -> Dict[str, Any]:
+    def generate_reader_report(
+        self, 
+        current_user: Dict[str, Any], 
+        reader_id: Optional[int] = None,
+        period: str = "all",
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> Dict[str, Any]:
         reader = self._resolve_reader(current_user, reader_id)
+        
+        # 构建时间范围条件
+        conditions = ["reader_id = ?"]
+        params: List[Any] = [reader["id"]]
+        
+        if period != "all":
+            from datetime import timedelta
+            today = date.today()
+            
+            if period == "3months":
+                cutoff_date = today - timedelta(days=90)
+            elif period == "6months":
+                cutoff_date = today - timedelta(days=180)
+            elif period == "1year":
+                cutoff_date = today - timedelta(days=365)
+            elif period == "custom":
+                if start_date:
+                    cutoff_date = date.fromisoformat(start_date)
+                else:
+                    cutoff_date = today - timedelta(days=365)  # 默认一年
+                if end_date:
+                    end_dt = date.fromisoformat(end_date)
+                    conditions.append("borrow_date <= ?")
+                    params.append(end_dt.isoformat())
+            else:
+                cutoff_date = today - timedelta(days=365)
+            
+            conditions.append("borrow_date >= ?")
+            params.append(cutoff_date.isoformat())
+        
+        where_sql = " WHERE " + " AND ".join(conditions)
+        
         rows = db_manager.fetch_all(
-            "SELECT * FROM v_borrow_detail WHERE reader_id = ? ORDER BY borrow_date DESC",
-            (reader["id"],),
+            f"SELECT * FROM v_borrow_detail{where_sql} ORDER BY borrow_date DESC",
+            tuple(params),
         )
+        
         report_items: List[Dict[str, Any]] = []
         total_reading_days = 0
         total_returned_days = 0
         for row in rows:
             borrow_date = date.fromisoformat(row["borrow_date"])
-            end_date = date.fromisoformat(row["return_date"]) if row["return_date"] else date.today()
-            duration_days = max((end_date - borrow_date).days, 0)
+            end_date_val = date.fromisoformat(row["return_date"]) if row["return_date"] else date.today()
+            duration_days = max((end_date_val - borrow_date).days, 0)
             row["borrow_duration_days"] = duration_days
             report_items.append(row)
             total_reading_days += duration_days

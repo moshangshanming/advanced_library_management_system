@@ -29,7 +29,6 @@ body {
   letter-spacing: 0.01em;
   position: relative;
 }
-<<<<<<< HEAD
 
 .hidden { display: none !important; }
 
@@ -208,9 +207,382 @@ tr:hover td { background: rgba(255, 255, 255, 0.4); }
 .row-actions { display: flex; gap: 8px; }
 .row-actions button { padding: 6px 12px; font-size: 12px; border-radius: 10px; }
 
-.report-preview { padding: 20px; background: rgba(255, 255, 255, 0.16); border-radius: 18px; }
-.report-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px; }
-.report-summary div { padding: 16px; border-radius: 16px; background: rgba(255, 255, 255, 0.35); color: #1f2937; }
+/* 报告预览区 */
+.report-preview { 
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+/* 空状态设计 */
+.report-empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--muted-foreground);
+}
+/* ========== 读书报告页面优化样式 ========== */
+
+/* 报告控制区域布局 */
+.report-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+  padding: 20px;
+  background: var(--muted);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 160px;
+  flex: 0 1 auto;
+}
+
+.control-group label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--foreground);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.control-group select,
+.control-group input[type="date"] {
+  height: var(--control-height);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  font-size: 14px;
+  transition: all 0.2s ease;
+  min-width: 160px;
+}
+
+.control-group select:focus,
+.control-group input[type="date"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.1);
+}
+
+.custom-date-range.hidden {
+  display: none;
+}
+
+.control-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.control-actions button {
+  height: var(--control-height);
+  padding: 0 20px;
+  font-size: 14px;
+  white-space: nowrap;
+  min-width: 100px;
+}
+
+.control-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* 响应式优化 */
+@media (max-width: 1200px) {
+  .report-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .control-group {
+    width: 100%;
+  }
+  
+  .control-actions {
+    margin-left: 0;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  
+  .control-actions button {
+    flex: 1;
+    min-width: 120px;
+  }
+}
+
+/* 空状态设计 */
+.report-empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--muted-foreground);
+}
+
+.report-empty-state .empty-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+  opacity: 0.6;
+}
+
+.report-empty-state h4 {
+  font-size: 18px;
+  color: var(--foreground);
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.report-empty-state p {
+  font-size: 14px;
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+
+.report-empty-state button.primary {
+  margin: 0 auto;
+}
+
+/* 报告核心数据卡片 */
+.report-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.summary-card {
+  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+}
+
+.summary-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.summary-card .card-label {
+  font-size: 13px;
+  color: var(--muted-foreground);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.summary-card .card-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+.summary-card .card-trend {
+  font-size: 12px;
+  color: #10b981;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.summary-card .card-trend.negative {
+  color: #ef4444;
+}
+
+/* 可视化图表区域 */
+.report-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.chart-container {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.chart-container h4 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--foreground);
+}
+
+.chart-container canvas {
+  width: 100% !important;
+  height: auto !important;
+  max-height: 280px;
+}
+
+/* 明细列表区域 */
+.report-details {
+  margin-top: 32px;
+}
+
+.report-details h4 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--border);
+  color: var(--foreground);
+}
+
+.detail-section {
+  margin-bottom: 24px;
+}
+
+.detail-section h5 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--accent);
+}
+
+/* 推荐模块增强 - 横向排列（旧版） */
+.recommendation-section {
+  position: relative;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.recommendation-section:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.recommendation-section h4 {
+  cursor: help;
+}
+
+/* 推荐模块 - 纵向排列（新版） */
+.recommendations-vertical {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.recommendation-section-vertical {
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 16px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  transition: all 0.2s ease;
+}
+
+.recommendation-section-vertical:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--accent);
+}
+
+.recommendation-section-vertical h4 {
+  margin: 0 0 20px;
+  font-size: 16px;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: help;
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 12px;
+}
+
+.recommendation-section-vertical h4 .icon {
+  font-size: 20px;
+}
+
+.recommendation-section-vertical .rec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 推荐图书卡片 */
+.rec-item {
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 12px;
+  font-size: 13px;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.rec-item:hover {
+  background: white;
+  border-color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.rec-item strong {
+  display: block;
+  color: #334155;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.rec-item .rec-author {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.rec-item .rec-reason {
+  color: var(--accent);
+  font-size: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.rec-item .rec-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.rec-item .rec-actions button {
+  padding: 4px 12px;
+  font-size: 12px;
+  height: 28px;
+}
+
+/* 加载动画 */
+.loading-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: white;
+  animation: spin 0.6s linear infinite;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+button.loading {
+  pointer-events: none;
+  opacity: 0.7;
+}
 
 /* --- 列表与杂项 --- */
 .pager { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-top: 20px; font-size: 13px; }
@@ -2088,4 +2460,58 @@ select + input {
 
 .select-clear:hover {
   color: var(--foreground);
+}
+
+/* ========== 读者管理面板样式 ========== */
+.readers-panel {
+  padding: 16px 24px 24px;
+}
+
+.readers-toolbar {
+  margin-bottom: 20px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.readers-toolbar input,
+.readers-toolbar select {
+  flex: 1;
+  min-width: 150px;
+}
+
+/* ========== 借还记录面板样式 ========== */
+.records-panel {
+  padding: 16px 24px 24px;
+}
+
+.records-toolbar {
+  margin-bottom: 20px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.records-toolbar input,
+.records-toolbar select {
+  flex: 1;
+  min-width: 150px;
+}
+
+/* 读者表单弹窗 */
+.reader-form-modal {
+  max-width: 800px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+/* 借书登记弹窗 */
+.borrow-form-modal {
+  max-width: 800px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
 }

@@ -29,8 +29,7 @@ from .schemas import (
     BookReviewCreate,
     BookReviewUpdate,
     RenewRequest,
-    ReservationCreate,
-    ReservationUpdate
+    ReservationCreate
 )
 from .security import create_token, verify_password, verify_token
 from .services import (
@@ -399,7 +398,7 @@ def renew_book(record_id: int, data: RenewRequest, current_user: Dict[str, Any] 
 
 @app.post("/api/reservations")
 def create_reservation(data: ReservationCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
-    result = borrow_service.create_reservation(data, current_user)
+    result = borrow_service.create_reservation(data.book_id, data.reader_id, current_user)
     audit_log_service.log_action(
         user_id=current_user["id"],
         action="RESERVE",
@@ -410,78 +409,15 @@ def create_reservation(data: ReservationCreate, current_user: Dict[str, Any] = D
     return result
 
 
-@app.put("/api/reservations/{reservation_id}")
-def update_reservation(reservation_id: int, data: ReservationUpdate, current_user: Dict[str, Any] = Depends(get_current_user)):
-    result = borrow_service.update_reservation(reservation_id, data, current_user)
-    audit_log_service.log_action(
-        user_id=current_user["id"],
-        action="UPDATE_RESERVATION",
-        target_type="reservation",
-        target_id=reservation_id,
-        details=f"修改预约"
-    )
-    return result
-
-
 @app.get("/api/reservations")
 def list_reservations(
     status_filter: str = Query(default="", alias="status"),
     keyword: str = "",
-    start_date: str = "",
-    end_date: str = "",
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    return borrow_service.list_reservations(
-        current_user=current_user, 
-        status_filter=status_filter, 
-        keyword=keyword,
-        start_date=start_date,
-        end_date=end_date,
-        page=page, 
-        page_size=page_size
-    )
-
-
-@app.get("/api/reservations/warnings")
-def get_reservation_warnings(current_user: Dict[str, Any] = Depends(require_staff)):
-    """获取即将到期的预约预警"""
-    return borrow_service.get_reservation_warnings()
-
-
-@app.post("/api/reservations/batch-cancel-expired")
-def batch_cancel_expired(current_user: Dict[str, Any] = Depends(require_staff)):
-    """批量取消已过期预约"""
-    result = borrow_service.batch_cancel_expired()
-    audit_log_service.log_action(
-        user_id=current_user["id"],
-        action="BATCH_CANCEL_EXPIRED",
-        target_type="reservation",
-        details=f"批量取消 {result['count']} 条过期预约"
-    )
-    return result
-
-
-@app.post("/api/reservations/{reservation_id}/fulfill")
-def fulfill_reservation(reservation_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
-    """标记取书"""
-    result = borrow_service.fulfill_reservation(reservation_id, current_user)
-    audit_log_service.log_action(
-        user_id=current_user["id"],
-        action="FULFILL_RESERVATION",
-        target_type="reservation",
-        target_id=reservation_id,
-        details=f"标记取书"
-    )
-    return result
-
-
-@app.post("/api/reservations/{reservation_id}/notify")
-def notify_reservation_expiry(reservation_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
-    """通知预约到期"""
-    result = borrow_service.notify_reservation_expiry(reservation_id, current_user)
-    return result
+    return borrow_service.list_reservations(current_user=current_user, status_filter=status_filter, keyword=keyword, page=page, page_size=page_size)
 
 
 @app.delete("/api/reservations/{reservation_id}")
@@ -495,25 +431,6 @@ def cancel_reservation(reservation_id: int, current_user: Dict[str, Any] = Depen
         details="取消预约"
     )
     return result
-
-
-@app.get("/api/reservations/export", response_class=PlainTextResponse)
-def export_reservations(
-    status_filter: str = Query(default="", alias="status"),
-    keyword: str = "",
-    start_date: str = "",
-    end_date: str = "",
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """导出预约记录为CSV"""
-    csv_content = borrow_service.export_reservations(
-        current_user=current_user,
-        status_filter=status_filter,
-        keyword=keyword,
-        start_date=start_date,
-        end_date=end_date
-    )
-    return PlainTextResponse(csv_content, media_type="text/csv; charset=utf-8")
 
 
 @app.get("/api/overdue")
@@ -587,8 +504,14 @@ def export_records(current_user: Dict[str, Any] = Depends(get_current_user)):
 
 
 @app.get("/api/reports/reader")
-def reader_report(reader_id: Optional[int] = None, current_user: Dict[str, Any] = Depends(get_current_user)):
-    return report_service.generate_reader_report(current_user, reader_id)
+def reader_report(
+    reader_id: Optional[int] = None, 
+    period: str = Query(default="all"),
+    start_date: Optional[str] = Query(default=None),
+    end_date: Optional[str] = Query(default=None),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    return report_service.generate_reader_report(current_user, reader_id, period, start_date, end_date)
 
 
 # ===== 公告管理 =====
