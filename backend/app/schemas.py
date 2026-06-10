@@ -182,16 +182,34 @@ class RenewRequest(BaseModel):
 class ReservationCreate(BaseModel):
     book_id: int = Field(..., ge=1)
     reader_id: Optional[int] = Field(default=None, ge=1)
+    reserve_date: str
+    valid_days: int = Field(default=7, ge=1, le=365)
+    expiry_date: Optional[str] = None
+    source: str = Field(default="manual")
+    remark: Optional[str] = ""
+
+
+class ReservationUpdate(BaseModel):
+    valid_days: Optional[int] = Field(default=None, ge=1, le=365)
+    expiry_date: Optional[str] = None
+    remark: Optional[str] = None
+    source: Optional[str] = None
 
 
 class Reservation(BaseModel):
     id: int
     book_id: int
     book_title: str
+    isbn: Optional[str]
     reader_id: int
     reader_name: str
     reader_username: str
+    department: Optional[str]
     reserve_date: str
+    valid_days: Optional[int]
+    expiry_date: Optional[str]
+    source: Optional[str]
+    remark: Optional[str]
     status: str
     notified: int
 
