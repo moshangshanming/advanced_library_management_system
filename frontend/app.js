@@ -908,6 +908,211 @@ async function handleImportReaders(event) {
   event.target.value = '';
 }
 
+// ========== 读者管理弹窗控制 ==========
+function openReaderFormModal(reader = null) {
+  $('readerFormTitle').textContent = reader ? '编辑读者' : '新增读者';
+  $('readerId').value = reader ? reader.id : '';
+  $('readerUsername').value = reader ? reader.username : '';
+  $('readerPassword').value = '';
+  $('readerConfirmPassword').value = '';
+  $('readerFullName').value = reader ? reader.full_name : '';
+  $('readerPhone').value = reader ? reader.phone : '';
+  $('readerEmail').value = reader ? reader.email || '' : '';
+  $('readerDepartment').value = reader ? reader.department || '' : '';
+  $('readerDepartmentCustom').value = '';
+  $('readerStatus').value = reader ? reader.status : 'active';
+  
+  // 清空验证错误
+  document.querySelectorAll('#readerFormModal .validation-error').forEach(el => {
+    el.textContent = '';
+    el.style.display = 'none';
+  });
+  
+  $('readerFormModal').classList.remove('hidden');
+}
+
+function closeReaderFormModal() {
+  $('readerFormModal').classList.add('hidden');
+}
+
+async function submitReaderForm() {
+  const id = $('readerId').value;
+  const username = $('readerUsername').value;
+  const password = $('readerPassword').value;
+  const confirmPassword = $('readerConfirmPassword').value;
+  const fullName = $('readerFullName').value;
+  const phone = $('readerPhone').value;
+  const email = $('readerEmail').value;
+  const department = $('readerDepartment').value || $('readerDepartmentCustom').value;
+  const status = $('readerStatus').value;
+  
+  // 表单校验
+  if (!username) {
+    toast('请输入用户名', 'error');
+    return;
+  }
+  if (!id && !password) {
+    toast('请输入密码', 'error');
+    return;
+  }
+  if (password && password !== confirmPassword) {
+    toast('两次输入的密码不一致', 'error');
+    return;
+  }
+  if (password && password.length < 8) {
+    toast('密码至少8位', 'error');
+    return;
+  }
+  if (!fullName) {
+    toast('请输入姓名', 'error');
+    return;
+  }
+  if (!phone) {
+    toast('请输入手机号', 'error');
+    return;
+  }
+  if (!/^1[3-9]\d{9}$/.test(phone)) {
+    toast('请输入有效的11位手机号', 'error');
+    return;
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    toast('请输入有效的邮箱地址', 'error');
+    return;
+  }
+  
+  try {
+    const payload = {
+      username,
+      full_name: fullName,
+      phone,
+      email: email || null,
+      department: department || null,
+      status
+    };
+    
+    if (id) {
+      // 编辑读者
+      if (password) {
+        payload.password = password;
+      }
+      await api(`/api/readers/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      toast(`读者「${fullName}」更新成功`, 'success');
+    } else {
+      // 新增读者
+      payload.password = password;
+      await api('/api/readers', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      toast(`读者「${fullName}」新增成功`, 'success');
+    }
+    
+    closeReaderFormModal();
+    loadReaders();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+// ========== 借书登记弹窗控制 ==========
+function openBorrowFormModal() {
+  $('borrowOutDate').value = new Date().toISOString().split('T')[0];
+  $('borrowDays').value = '30';
+  $('borrowDueDate').value = '';
+  $('borrowRemarkType').value = '';
+  $('borrowRemark').value = '';
+  
+  // 加载图书和读者下拉框
+  loadBorrowOptions();
+  calculateDueDate();
+  
+  $('borrowFormModal').classList.remove('hidden');
+}
+
+function closeBorrowFormModal() {
+  $('borrowFormModal').classList.add('hidden');
+}
+
+function calculateDueDate() {
+  const outDate = $('borrowOutDate').value;
+  const days = parseInt($('borrowDays').value) || 30;
+  
+  if (outDate) {
+    const dueDate = new Date(outDate);
+    dueDate.setDate(dueDate.getDate() + days);
+    const year = dueDate.getFullYear();
+    const month = String(dueDate.getMonth() + 1).padStart(2, '0');
+    const day = String(dueDate.getDate()).padStart(2, '0');
+    $('borrowDueDate').value = `${year}-${month}-${day}`;
+  } else {
+    $('borrowDueDate').value = '';
+  }
+}
+
+async function submitBorrowForm() {
+  const bookId = $('borrowBook').value;
+  const readerId = $('borrowReader').value;
+  const outDate = $('borrowOutDate').value;
+  const days = parseInt($('borrowDays').value);
+  const dueDate = $('borrowDueDate').value;
+  const remarkType = $('borrowRemarkType').value;
+  const remark = $('borrowRemark').value;
+  
+  // 表单校验
+  if (!bookId) {
+    toast('请选择借阅的图书', 'error');
+    return;
+  }
+  if (!readerId) {
+    toast('请选择读者', 'error');
+    return;
+  }
+  if (!outDate) {
+    toast('请选择借出日期', 'error');
+    return;
+  }
+  if (days > 30) {
+    toast('最长借阅天数为30天', 'error');
+    return;
+  }
+  
+  // 组合备注
+  let fullRemark = remark;
+  if (remarkType) {
+    const typeMap = { teacher: '教师借阅', holiday: '学生假期借阅' };
+    fullRemark = remark ? `${typeMap[remarkType]} - ${remark}` : typeMap[remarkType];
+  }
+  
+  try {
+    await api('/api/borrow-records', {
+      method: 'POST',
+      body: JSON.stringify({
+        book_id: parseInt(bookId),
+        reader_id: parseInt(readerId),
+        borrow_date: outDate,
+        due_date: dueDate,
+        remark: fullRemark || null
+      })
+    });
+    
+    // 获取图书和读者信息用于提示
+    const bookSelect = $('borrowBook');
+    const readerSelect = $('borrowReader');
+    const bookTitle = bookSelect.options[bookSelect.selectedIndex]?.text.split('(')[0] || '图书';
+    const readerName = readerSelect.options[readerSelect.selectedIndex]?.text.split('(')[0] || '读者';
+    
+    toast(`《${bookTitle}》已成功借给读者「${readerName}」，应还日期为 ${dueDate}`, 'success');
+    closeBorrowFormModal();
+    loadRecords();
+    loadDashboard(); // 刷新仪表盘
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
 function resetReaderForm() {
   $('readerForm').reset(); $('readerId').value = ''; $('readerUsername').disabled = false;
 }
@@ -2153,7 +2358,8 @@ async function exportAuditLogs() {
 }
 
 // Event bindings
-$('loginForm').addEventListener('submit', async (e) => {
+document.addEventListener('DOMContentLoaded', function() {
+  $('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
     const data = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: $('loginUsername').value, password: $('loginPassword').value }) });
@@ -2197,6 +2403,8 @@ $('importReadersBtn').addEventListener('click', () => $('importReadersFile').cli
 $('importReadersFile').addEventListener('change', handleImportReaders);
 // 注意：readerForm已改为弹窗形式(readerFormInner)，使用onclick直接调用submitReaderForm()
 // $('readerForm').addEventListener('submit', ...); // 已移除
+// 新增读者按钮事件绑定
+$('addReaderBtn')?.addEventListener('click', () => openReaderFormModal());
 $('recordSearchBtn').addEventListener('click', () => { state.recordPage = 1; loadRecords(); });
 $('recordPrev').addEventListener('click', () => { if (state.recordPage > 1) { state.recordPage--; loadRecords(); } });
 $('recordNext').addEventListener('click', () => { state.recordPage++; loadRecords(); });
@@ -2206,6 +2414,8 @@ $('reservationPrev').addEventListener('click', () => { if (state.reservationPage
 $('reservationNext').addEventListener('click', () => { state.reservationPage++; loadReservations(); });
 // 注意：borrowForm已改为弹窗形式(borrowFormInner)，使用onclick直接调用submitBorrowForm()
 // $('borrowForm').addEventListener('submit', ...); // 已移除
+// 借书登记按钮事件绑定
+$('openBorrowFormBtn')?.addEventListener('click', openBorrowFormModal);
 $('generateReportBtn').addEventListener('click', loadReport);
 $('downloadReportBtn').addEventListener('click', downloadReport);
 $('refreshOverdueBtn').addEventListener('click', () => { overduePage = 1; loadOverdue(); });
@@ -2713,9 +2923,4 @@ $('borrowFormModal')?.addEventListener('click', function(e) {
   }
 });
 
-// ========== 事件监听器 ==========
-// 读者管理按钮
-$('addReaderBtn')?.addEventListener('click', () => openReaderFormModal());
-
-// 借书登记按钮
-$('openBorrowFormBtn')?.addEventListener('click', openBorrowFormModal);
+}); // 结束 DOMContentLoaded
