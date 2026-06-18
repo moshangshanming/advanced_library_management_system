@@ -1,4 +1,4 @@
-console.log('app.js loaded');
+﻿console.log('app.js loaded');
 const API_BASE_URL = window.location.origin; // 动态获取当前页面地址，避免 localhost/127.0.0.1 不一致问题
 const state = {
   token: localStorage.getItem('library_token') || '',
@@ -15,6 +15,15 @@ const state = {
 };
 
 const $ = (id) => document.getElementById(id);
+
+// 导航分组折叠/展开
+function toggleNavGroup(header) {
+  header.classList.toggle('expanded');
+  const content = header.nextElementSibling;
+  if (content) {
+    content.style.display = header.classList.contains('expanded') ? 'block' : 'none';
+  }
+}
 
 function toast(message, type = 'info') {
   const el = $('toast');
@@ -181,6 +190,7 @@ async function loadDashboard() {
           <small>${escapeHtml(item.author)}</small>
         </div>
         <b>${item.borrow_count} 次</b>
+        <button class="btn primary small" onclick="event.stopPropagation(); quickBorrow(${item.id})">借阅</button>
       </div>
     `).join('') : '<p>暂无借阅数据</p>';
   } catch (error) {
@@ -607,8 +617,6 @@ async function showBookDetail(bookId) {
     $('detailCategory').textContent = book.category;
     $('detailShelf').textContent = book.shelf_location || '未知';
     $('detailStock').textContent = `可借：${book.available_count} / 馆藏：${book.total_count}`;
-    const price = book.price || 0;
-    $('detailPrice').textContent = price > 0 ? `¥${price.toFixed(2)}` : '暂无定价';
     
     const description = book.description || '暂无简介';
     $('detailDescription').textContent = description;
@@ -637,20 +645,21 @@ async function showBookDetail(bookId) {
       $('detailCoverUpload').classList.add('hidden');
     }
 
-    // 根据库存设置借阅按钮状态
+    // 根据库存设置借阅和预约按钮状态
     const borrowBtn = $('detailBorrowBtn');
+    const reserveBtn = $('detailReserveBtn');
+    
     if (book.available_count > 0) {
-      borrowBtn.classList.remove('hidden', 'disabled');
       borrowBtn.textContent = '借阅';
       borrowBtn.disabled = false;
-      $('detailReserveBtn').classList.add('hidden');
     } else {
-      borrowBtn.classList.remove('hidden');
-      borrowBtn.classList.add('disabled');
       borrowBtn.textContent = '暂无可借库存';
       borrowBtn.disabled = true;
-      $('detailReserveBtn').classList.remove('hidden');
     }
+    
+    // 预约按钮始终显示
+    reserveBtn.classList.remove('hidden');
+    reserveBtn.disabled = false;
 
     // 保存当前书籍ID用于借阅/预约
     state.currentDetailBookId = bookId;
@@ -710,11 +719,7 @@ async function uploadDetailCover(input) {
 function quickBorrowFromDetail() {
   if (!state.currentDetailBookId) return;
   closeBookDetailModal();
-  switchView('records');
-  setTimeout(() => {
-    $('borrowBook').value = state.currentDetailBookId;
-    toast('已选择图书，请确认借阅信息');
-  }, 100);
+  quickBorrow(state.currentDetailBookId);
 }
 
 async function reserveBookFromDetail() {
@@ -866,9 +871,109 @@ async function deleteBook(id) {
   catch (e) { toast(e.message, 'error'); }
 }
 
+let pendingBorrowBookId = null;
+let pendingBorrowCoverUrl = null;
+
 async function quickBorrow(bookId) {
-  switchView('records');
-  setTimeout(() => { $('borrowBook').value = bookId; toast('已选择图书，请确认借阅信息'); }, 100);
+  try {
+    const bookData = await api(`/api/books/${bookId}`);
+    
+    if (!bookData) {
+      toast('未找到该图书', 'error');
+      return;
+    }
+    
+    if (bookData.available_count <= 0) {
+      alert('该书暂无可借阅库存，无法借阅');
+      return;
+    }
+
+    pendingBorrowBookId = bookId;
+    const coverUrl = bookData.cover_image ? `/uploads/${bookData.cover_image}` : 
+                     bookData.cover_url || '/static/placeholder-cover.png';
+    pendingBorrowCoverUrl = coverUrl;
+    
+    $('borrowConfirmCover').src = pendingBorrowCoverUrl;
+    $('borrowConfirmTitle').textContent = bookData.title;
+    $('borrowConfirmAuthor').textContent = bookData.author;
+    $('borrowConfirmStock').textContent = bookData.available_count;
+    $('borrowConfirmDaysInput').value = 30;
+    
+    $('borrowConfirmModal').classList.remove('hidden');
+  } catch (e) {
+    toast(e.message || '操作失败', 'error');
+  }
+}
+
+function closeBorrowConfirmModal() {
+  $('borrowConfirmModal').classList.add('hidden');
+  pendingBorrowBookId = null;
+  pendingBorrowCoverUrl = null;
+}
+
+document.getElementById('borrowConfirmModal')?.addEventListener('click', function(e) {
+  if (e.target === this) {
+    closeBorrowConfirmModal();
+  }
+});
+
+document.getElementById('borrowConfirmDaysInput')?.addEventListener('blur', function(e) {
+  const input = e.target;
+  const value = parseInt(input.value);
+  
+  if (isNaN(value) || value < 1 || value > 90) {
+    input.value = 30;
+    toast('借阅天数必须是1-90之间的正整数', 'error');
+  }
+});
+
+async function confirmBorrow() {
+  if (!pendingBorrowBookId) return;
+
+  const daysInput = $('borrowConfirmDaysInput');
+  const days = parseInt(daysInput.value);
+  
+  if (isNaN(days) || days < 1 || days > 90) {
+    toast('借阅天数必须是1-90之间的正整数', 'error');
+    return;
+  }
+
+  const btn = $('confirmBorrowBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '借阅中...';
+
+  try {
+    const response = await api('/api/borrow-records', {
+      method: 'POST',
+      body: JSON.stringify({
+        book_id: pendingBorrowBookId,
+        days: days,
+        remark: ''
+      })
+    });
+
+    closeBorrowConfirmModal();
+    const bookTitle = response.title || response.book_title || '该书';
+    toast(`借阅成功！\n《${bookTitle}》\n应还日期：${response.due_date}`, 'success');
+    await loadBooks();
+
+    if (state.user.role !== 'reader') {
+      switchView('records');
+    }
+  } catch (e) {
+    toast(e.message || '借阅失败', 'error');
+    closeBorrowConfirmModal();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+function calculateDueDate(days) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 async function loadReaders() {
@@ -1908,9 +2013,9 @@ function initReportPageEvents() {
   try {
     console.log('Initializing report page events...');
 
-    // 检查所有必需的元素是否存在
+    // 检查必需的元素是否存在（reportReader可能在读者端不存在）
     const requiredElements = [
-      'reportReader', 'reportPeriod', 'generateReportBtn',
+      'reportPeriod', 'generateReportBtn',
       'downloadReportCsvBtn', 'downloadReportPdfBtn'
     ];
 
@@ -1922,10 +2027,13 @@ function initReportPageEvents() {
       }
     }
 
-    // 读者选择变化时更新按钮状态
-    $('reportReader').addEventListener('change', function() {
-      updateReportButtonStates();
-    });
+    // 读者选择变化时更新按钮状态（仅在元素存在时绑定）
+    const reportReaderEl = $('reportReader');
+    if (reportReaderEl) {
+      reportReaderEl.addEventListener('change', function() {
+        updateReportButtonStates();
+      });
+    }
 
     // 报告周期变化时显示/隐藏自定义日期范围
     $('reportPeriod').addEventListener('change', function() {
@@ -1945,9 +2053,16 @@ function initReportPageEvents() {
     // 快捷生成报告按钮
     const quickBtn = $('quickGenerateReportBtn');
     if (quickBtn) {
-      quickBtn.addEventListener('click', function() {
-        $('reportReader').focus();
-        toast('请先选择读者，然后点击「生成报告」');
+      quickBtn.addEventListener('click', async function() {
+        if (state.user.role === 'reader') {
+          // 读者端直接生成报告
+          await generateReportWithLoading();
+        } else {
+          // 管理员端提示选择读者
+          const readerSelect = $('reportReader');
+          if (readerSelect) readerSelect.focus();
+          toast('请先选择读者，然后点击「生成报告」');
+        }
       });
     }
 
@@ -1987,6 +2102,9 @@ function initReportPageEvents() {
       }
     };
 
+    // 初始化按钮状态（读者端启用生成按钮）
+    updateReportButtonStates();
+
     reportEventsInitialized = true;
     console.log('Report page events initialized successfully');
   } catch (error) {
@@ -1998,20 +2116,28 @@ function initReportPageEvents() {
 
 // 更新按钮状态
 function updateReportButtonStates() {
-  const readerId = $('reportReader').value;
   const hasReport = state.currentReport !== null;
-
-  // 生成报告按钮：未选择读者时置灰
-  if (!readerId) {
-    $('generateReportBtn').disabled = true;
-    $('generateReportBtn').title = '请先选择读者';
-  } else {
+  
+  // 读者端（reader角色）生成报告按钮始终可用
+  const isReader = state.user.role === 'reader';
+  const readerSelect = $('reportReader');
+  const hasReaderSelection = readerSelect && readerSelect.value;
+  
+  if (isReader) {
     $('generateReportBtn').disabled = false;
     $('generateReportBtn').title = '点击生成读书报告';
+  } else {
+    // 管理员/馆员端需要选择读者
+    if (!hasReaderSelection) {
+      $('generateReportBtn').disabled = true;
+      $('generateReportBtn').title = '请先选择读者';
+    } else {
+      $('generateReportBtn').disabled = false;
+      $('generateReportBtn').title = '点击生成读书报告';
+    }
   }
 
   // 下载按钮：仅当报告生成成功后可点击
-  // 不使用disabled，改用onclick中判断
   $('downloadReportCsvBtn').title = hasReport ? '下载CSV格式报告' : '请先生成报告';
   $('downloadReportCsvBtn').style.opacity = hasReport ? '1' : '0.5';
   $('downloadReportCsvBtn').style.cursor = hasReport ? 'pointer' : 'not-allowed';
@@ -2023,9 +2149,17 @@ function updateReportButtonStates() {
 
 // 带加载动画的报告生成
 async function generateReportWithLoading() {
-  const readerId = $('reportReader').value;
+  // 读者端使用当前登录用户的ID，管理员端使用选择的读者ID
+  let readerId = state.user.id;
+  if (state.user.role === 'admin' || state.user.role === 'staff') {
+    const readerSelect = $('reportReader');
+    if (readerSelect) {
+      readerId = readerSelect.value;
+    }
+  }
+  
   if (!readerId) {
-    toast('请先选择读者', 'error');
+    toast('无法获取读者信息', 'error');
     return;
   }
 
@@ -2064,8 +2198,11 @@ async function generateReportWithLoading() {
     updateReportButtonStates();
 
     // 获取读者姓名用于toast
+    let readerName = state.user.name || state.user.username || '该读者';
     const readerSelect = $('reportReader');
-    const readerName = readerSelect.options[readerSelect.selectedIndex]?.text || '该读者';
+    if (readerSelect && readerSelect.options) {
+      readerName = readerSelect.options[readerSelect.selectedIndex]?.text || readerName;
+    }
 
     toast(`读者「${readerName}」的读书报告已生成，可在线预览或下载`, 'success');
   } catch (err) {

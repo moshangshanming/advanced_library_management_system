@@ -263,31 +263,49 @@ class BorrowService:
                 db_manager.execute("UPDATE borrow_records SET fine_amount = ? WHERE id = ?", (fine_amount, record["id"]))
 
     def borrow_book(self, data: BorrowCreate, current_user: Dict[str, Any]) -> Dict[str, Any]:
+        MAX_BORROW_LIMIT = 10
+        
         reader_id = data.reader_id
         if current_user["role"] == "reader":
             reader_id = current_user["id"]
         if not reader_id:
             raise HTTPException(status_code=400, detail="管理员借书时必须选择读者。")
+        
         reader = db_manager.fetch_one("SELECT id, status FROM users WHERE id = ? AND role = 'reader'", (reader_id,))
         if not reader:
             raise HTTPException(status_code=404, detail="读者不存在。")
         if reader["status"] != "active":
             raise HTTPException(status_code=400, detail="该读者账号已冻结，不能借书。")
+        
         book = db_manager.fetch_one("SELECT * FROM books WHERE id = ?", (data.book_id,))
         if not book:
             raise HTTPException(status_code=404, detail="图书不存在。")
-        if book["available_count"] <= 0:
-            raise HTTPException(status_code=400, detail="该图书库存不足，暂时无法借阅。")
-        duplicate = db_manager.fetch_one(
-            "SELECT COUNT(*) AS n FROM borrow_records WHERE reader_id = ? AND book_id = ? AND status IN ('borrowed', 'overdue')",
-            (reader_id, data.book_id),
-        )["n"]
-        if duplicate:
-            raise HTTPException(status_code=400, detail="该读者已经借阅此书且尚未归还。")
-        borrow_date = date.today()
-        due_date = borrow_date + timedelta(days=data.days)
+        if book["status"] != "available":
+            raise HTTPException(status_code=400, detail="该图书已下架或不可借阅。")
+        
         with db_manager.transaction() as conn:
+            book_locked = conn.execute("SELECT available_count FROM books WHERE id = ?", (data.book_id,)).fetchone()
+            if not book_locked or book_locked["available_count"] <= 0:
+                raise HTTPException(status_code=400, detail="该图书库存不足，暂时无法借阅。")
+            
+            current_borrows = conn.execute(
+                "SELECT COUNT(*) AS n FROM borrow_records WHERE reader_id = ? AND status IN ('borrowed', 'overdue')",
+                (reader_id,),
+            ).fetchone()["n"]
+            if current_borrows >= MAX_BORROW_LIMIT:
+                raise HTTPException(status_code=400, detail=f"该读者已达到最大借阅数量限制（{MAX_BORROW_LIMIT}本）。")
+            
+            duplicate = conn.execute(
+                "SELECT COUNT(*) AS n FROM borrow_records WHERE reader_id = ? AND book_id = ? AND status IN ('borrowed', 'overdue')",
+                (reader_id, data.book_id),
+            ).fetchone()["n"]
+            if duplicate:
+                raise HTTPException(status_code=400, detail="该读者已经借阅此书且尚未归还。")
+            
             conn.execute("UPDATE books SET available_count = available_count - 1, updated_at = datetime('now', 'localtime') WHERE id = ?", (data.book_id,))
+            
+            borrow_date = date.today()
+            due_date = borrow_date + timedelta(days=data.days)
             cursor = conn.execute(
                 """
                 INSERT INTO borrow_records(book_id, reader_id, borrow_date, due_date, status, remark)
@@ -296,6 +314,7 @@ class BorrowService:
                 (data.book_id, reader_id, borrow_date.isoformat(), due_date.isoformat(), data.remark.strip()),
             )
             record_id = cursor.lastrowid
+        
         return self.get_record(record_id, current_user)
 
     def return_book(self, record_id: int, current_user: Dict[str, Any]) -> Dict[str, Any]:

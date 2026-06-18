@@ -80,15 +80,36 @@
         </div>
       </div>
       <button data-view="dashboard" class="nav active">数据总览</button>
-      <button data-view="books" class="nav">图书管理</button>
-      <button data-view="readers" class="nav staff-only">读者管理</button>
-      <button data-view="records" class="nav">借还记录</button>
-      <button data-view="reservations" class="nav">预约管理</button>
+      <div class="nav-group">
+        <div class="nav-group-header" onclick="toggleNavGroup(this)">
+          <span class="nav-group-title">资源管理</span>
+        </div>
+        <div class="nav-group-content">
+          <button data-view="books" class="nav">图书管理</button>
+          <button data-view="readers" class="nav staff-only">读者管理</button>
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-header" onclick="toggleNavGroup(this)">
+          <span class="nav-group-title">业务运营</span>
+        </div>
+        <div class="nav-group-content">
+          <button data-view="records" class="nav">借还记录</button>
+          <button data-view="reservations" class="nav">预约管理</button>
+          <button data-view="overdue" class="nav staff-only">逾期提醒</button>
+          <button data-view="reports" class="nav">读书报告</button>
+        </div>
+      </div>
+      <div class="nav-group staff-only">
+        <div class="nav-group-header" onclick="toggleNavGroup(this)">
+          <span class="nav-group-title">系统管理</span>
+        </div>
+        <div class="nav-group-content">
+          <button data-view="announcements" class="nav">公告通知</button>
+          <button data-view="audit" class="nav admin-only">操作日志</button>
+        </div>
+      </div>
       <button data-view="messages" class="nav">我的消息</button>
-      <button data-view="reports" class="nav">读书报告</button>
-      <button data-view="overdue" class="nav staff-only">逾期提醒</button>
-      <button data-view="announcements" class="nav staff-only">公告通知</button>
-      <button data-view="audit" class="nav admin-only">操作日志</button>
     </aside>
 
     <section class="workspace">
@@ -670,9 +691,9 @@
           
           <!-- 报告生成控制区 -->
           <div class="report-controls">
-            <div class="control-group">
+            <div class="control-group staff-only">
               <label>选择读者
-                <select id="reportReader" class="admin-only"><option value="">请选择读者</option></select>
+                <select id="reportReader"><option value="">请选择读者</option></select>
               </label>
             </div>
             <div class="control-group">
@@ -852,24 +873,28 @@
 
     <!-- 书籍详情模态框 -->
   <div id="bookDetailModal" class="modal hidden">
-    <div class="modal-content book-detail-content">
-      <div class="modal-header">
+    <div class="modal-content book-detail-modal">
+      <div class="modal-header sticky-header">
         <h3>图书详情</h3>
         <button class="close-btn" onclick="closeBookDetailModal()">&times;</button>
       </div>
-      <div class="modal-body book-detail-body">
-        <div class="book-detail-cover-section">
-          <img id="detailCover" src="/static/placeholder-cover.png" alt="图书封面" />
-          <label id="detailCoverUpload" class="detail-cover-upload hidden">
-            <input type="file" accept="image/*" onchange="uploadDetailCover(this)" />
-            <span>更换封面</span>
-          </label>
+      <div class="modal-body-scrollable book-detail-body">
+        <div class="book-detail-header-row">
+          <div class="book-detail-cover-section">
+            <img id="detailCover" src="/static/placeholder-cover.png" alt="图书封面" />
+            <label id="detailCoverUpload" class="detail-cover-upload hidden">
+              <input type="file" accept="image/*" onchange="uploadDetailCover(this)" />
+              <span>更换封面</span>
+            </label>
+          </div>
+          <div class="book-detail-title-section">
+            <div class="book-detail-header">
+              <h2 id="detailTitle">书名</h2>
+              <p id="detailAuthor" class="detail-author">作者</p>
+            </div>
+          </div>
         </div>
         <div class="book-detail-main">
-          <div class="book-detail-header">
-            <h2 id="detailTitle">书名</h2>
-            <p id="detailAuthor" class="detail-author">作者</p>
-          </div>
           <div class="book-detail-meta-section">
             <h4>基础信息</h4>
             <div class="detail-meta">
@@ -894,10 +919,6 @@
                 <span id="detailStock" class="meta-value highlight"></span>
               </div>
               <div class="meta-row">
-                <span class="meta-label">价格:</span>
-                <span id="detailPrice" class="meta-value highlight">¥0.00</span>
-              </div>
-              <div class="meta-row">
                 <span class="meta-label">借阅次数:</span>
                 <span id="detailBorrowCount" class="meta-value"></span>
               </div>
@@ -912,10 +933,42 @@
           </div>
         </div>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer sticky-footer">
         <button class="btn ghost" onclick="closeBookDetailModal()">关闭</button>
+        <button id="detailReserveBtn" class="btn ghost" onclick="reserveBookFromDetail()">预约</button>
         <button id="detailBorrowBtn" class="btn primary" onclick="quickBorrowFromDetail()">借阅</button>
-        <button id="detailReserveBtn" class="btn ghost hidden" onclick="reserveBookFromDetail()">预约</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 借阅确认弹窗 -->
+  <div id="borrowConfirmModal" class="modal hidden">
+    <div class="modal-content borrow-confirm-modal">
+      <div class="modal-header">
+        <h3>确认借阅</h3>
+        <button class="close-btn" onclick="closeBorrowConfirmModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="borrow-confirm-content">
+          <img id="borrowConfirmCover" src="/static/placeholder-cover.png" alt="图书封面" />
+          <div class="borrow-confirm-info">
+            <h4 id="borrowConfirmTitle"></h4>
+            <p id="borrowConfirmAuthor"></p>
+            <div class="borrow-confirm-stock">
+              <span class="stock-label">可借库存:</span>
+              <span id="borrowConfirmStock"></span>
+            </div>
+            <div class="borrow-confirm-days">
+              <span class="days-label">借阅期限:</span>
+              <input type="number" id="borrowConfirmDaysInput" min="1" max="90" value="30" placeholder="请输入天数" />
+              <span class="days-unit">天</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn ghost" onclick="closeBorrowConfirmModal()">取消</button>
+        <button id="confirmBorrowBtn" class="btn primary" onclick="confirmBorrow()">确认借阅</button>
       </div>
     </div>
   </div>
