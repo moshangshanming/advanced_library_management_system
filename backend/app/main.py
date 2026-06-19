@@ -405,14 +405,7 @@ def renew_book(record_id: int, data: RenewRequest, current_user: Dict[str, Any] 
 
 @app.post("/api/reservations")
 def create_reservation(data: ReservationCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
-    result = borrow_service.create_reservation(data.book_id, data.reader_id, current_user)
-    audit_log_service.log_action(
-        user_id=current_user["id"],
-        action="RESERVE",
-        target_type="book",
-        target_id=data.book_id,
-        details=f"预约图书"
-    )
+    result = borrow_service.create_reservation(data.book_id, data.reader_id, current_user, data.phone or "")
     return result
 
 

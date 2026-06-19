@@ -1,4 +1,4 @@
-﻿console.log('app.js loaded');
+console.log('app.js loaded');
 const API_BASE_URL = window.location.origin; // 动态获取当前页面地址，避免 localhost/127.0.0.1 不一致问题
 const state = {
   token: localStorage.getItem('library_token') || '',
@@ -41,7 +41,13 @@ async function api(path, options = {}) {
   const contentType = response.headers.get('content-type') || '';
   if (!response.ok) {
     let detail = '请求失败';
-    try { detail = (await response.json()).detail || detail; } catch (_) {}
+    try { 
+      const errorData = await response.json();
+      detail = errorData.detail || errorData.message || detail;
+      if (typeof detail !== 'string') {
+        detail = JSON.stringify(detail) || '请求失败';
+      }
+    } catch (_) {}
     if (response.status === 401) logout(false);
     throw new Error(detail);
   }
@@ -56,7 +62,27 @@ function showApp() {
   $('currentUser').textContent = `${state.user.full_name}（${roleNames[state.user.role] || state.user.role}）`;
   document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', state.user.role !== 'admin'));
   document.querySelectorAll('.staff-only').forEach(el => el.classList.toggle('hidden', state.user.role === 'reader'));
+  document.querySelectorAll('.reader-only').forEach(el => el.classList.toggle('hidden', state.user.role !== 'reader'));
+  updateUnreadBadge();
   switchView('dashboard');
+}
+
+// 更新侧边栏未读消息角标
+async function updateUnreadBadge() {
+  try {
+    const result = await api('/api/messages/unread-count');
+    const badge = $('sidebarUnreadBadge');
+    if (badge) {
+      if (result.count > 0) {
+        badge.textContent = result.count > 99 ? '99+' : result.count;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
+  } catch (e) {
+    console.error('获取未读消息数量失败:', e);
+  }
 }
 
 function showLogin() {
@@ -117,6 +143,10 @@ function switchView(viewName) {
   if (viewName === 'reservations' && state.user.role === 'reader') {
     $('pageTitle').textContent = '我的预约';
     $('pageSubtitle').textContent = '查看和管理您的图书预约记录。';
+  } else if (viewName === 'overdue' && state.user.role === 'reader') {
+    // 读者端逾期提醒页面副标题
+    $('pageTitle').textContent = '逾期提醒';
+    $('pageSubtitle').textContent = '您当前存在逾期借阅图书，请尽快归还结清罚金。';
   } else {
     $('pageTitle').textContent = titleMap[viewName][0];
     $('pageSubtitle').textContent = titleMap[viewName][1];
@@ -488,6 +518,7 @@ async function loadBooks() {
         <div class="book-actions" onclick="event.stopPropagation()">
           <button class="primary small" onclick="showBookDetail(${book.id})">详情</button>
           <button class="primary small" onclick="quickBorrow(${book.id})">借阅</button>
+          <button class="ghost small" onclick="quickReserve(${book.id})">预约</button>
           ${state.user.role === 'admin' || state.user.role === 'librarian' ? `<button class="ghost small" onclick="editBook(${book.id})">编辑</button><button class="danger small" onclick="deleteBook(${book.id})">删除</button>` : ''}
         </div>
       </div>
@@ -666,7 +697,8 @@ async function showBookDetail(bookId) {
 
     $('bookDetailModal').classList.remove('hidden');
   } catch (e) {
-    toast('加载图书详情失败: ' + e.message, 'error');
+    const errorMsg = typeof e.message === 'string' ? e.message : e.message?.detail || e.message?.message || JSON.stringify(e.message) || '加载失败';
+    toast('加载图书详情失败: ' + errorMsg, 'error');
   }
 }
 
@@ -717,20 +749,143 @@ async function uploadDetailCover(input) {
 }
 
 function quickBorrowFromDetail() {
-  if (!state.currentDetailBookId) return;
+  const bookId = state.currentDetailBookId;
+  if (!bookId) return;
   closeBookDetailModal();
-  quickBorrow(state.currentDetailBookId);
+  quickBorrow(bookId);
 }
 
+// 图书卡片预约按钮点击
+async function quickReserve(bookId) {
+  try {
+    const bookData = await api(`/api/books/${bookId}`);
+    
+    if (!bookData) {
+      toast('未找到该图书', 'error');
+      return;
+    }
+    
+    // 场景2：库存>0时提示可直接借阅（警告红底）
+    if (bookData.available_count > 0) {
+      toast('该书可直接借阅，无需预约', 'error');
+      return;
+    }
+    
+    // 库存=0时，先检查是否已预约
+    try {
+      const reservations = await api('/api/reservations?status=pending');
+      const items = reservations.items || [];
+      const existingReservation = items.find(r => r.book_id === bookId);
+      
+      if (existingReservation) {
+        // 场景3：已预约过该书（警告红底）
+        toast('您已预约本书，请勿重复操作', 'error');
+        return;
+      }
+    } catch (e) {
+      // 忽略检查错误，继续预约流程
+      console.error('检查预约状态失败:', e);
+    }
+    
+    // 场景1：直接提交预约（不再显示确认弹窗）
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/reservations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${state.token}`
+        },
+        body: JSON.stringify({
+          book_id: bookId,
+          reader_id: state.user.id,
+          phone: ''
+        })
+      });
+      
+      // 预约已提交（后端成功创建了预约记录）
+      // 场景4：预约成功（金色成功底）
+      toast('预约成功，可在预约通知中查看', 'success');
+      try {
+        await loadBooks();
+      } catch (e) {
+        console.error('刷新列表失败:', e);
+      }
+    } catch (e) {
+      console.error('预约请求失败:', e);
+      toast('请求失败，请稍后重试', 'error');
+    }
+  } catch (e) {
+    console.error('预约流程外层错误:', e);
+    // 场景5：预约提交失败
+    toast('请求失败，请稍后重试', 'error');
+  }
+}
+
+// 图书详情弹窗中的预约函数
 async function reserveBookFromDetail() {
   if (!state.currentDetailBookId) return;
-  if (!confirm('确认预约这本图书？当图书归还时，您将收到通知。')) return;
+  
   try {
-    await api('/api/reservations', { method: 'POST', body: JSON.stringify({ book_id: state.currentDetailBookId, reader_id: state.user.id }) });
-    toast('预约成功！当图书归还时您将收到通知', 'success');
-    closeBookDetailModal();
+    const bookData = await api(`/api/books/${state.currentDetailBookId}`);
+    
+    if (!bookData) {
+      toast('未找到该图书', 'error');
+      return;
+    }
+    
+    // 场景2：库存>0时提示可直接借阅（警告红底）
+    if (bookData.available_count > 0) {
+      toast('该书可直接借阅，无需预约', 'error');
+      return;
+    }
+    
+    // 库存=0时，先检查是否已预约
+    try {
+      const reservations = await api('/api/reservations?status=pending');
+      const items = reservations.items || [];
+      const existingReservation = items.find(r => r.book_id === state.currentDetailBookId);
+      
+      if (existingReservation) {
+        // 场景3：已预约过该书（警告红底）
+        toast('您已预约本书，请勿重复操作', 'error');
+        return;
+      }
+    } catch (e) {
+      // 忽略检查错误，继续预约流程
+      console.error('检查预约状态失败:', e);
+    }
+    
+    // 场景1：直接提交预约（不再显示确认弹窗）
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/reservations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${state.token}`
+        },
+        body: JSON.stringify({
+          book_id: state.currentDetailBookId,
+          reader_id: state.user.id,
+          phone: ''
+        })
+      });
+      
+      // 预约已提交（后端成功创建了预约记录）
+      // 场景4：预约成功（金色成功底）
+      toast('预约成功，可在预约通知中查看', 'success');
+      closeBookDetailModal();
+      try {
+        await loadBooks();
+      } catch (e) {
+        console.error('刷新列表失败:', e);
+      }
+    } catch (e) {
+      console.error('预约请求失败:', e);
+      toast('请求失败，请稍后重试', 'error');
+    }
   } catch (e) {
-    toast(e.message, 'error');
+    console.error('预约流程外层错误:', e);
+    toast('请求失败，请稍后重试', 'error');
   }
 }
 
@@ -874,6 +1029,102 @@ async function deleteBook(id) {
 let pendingBorrowBookId = null;
 let pendingBorrowCoverUrl = null;
 
+// 格式化日期为YYYY-MM-DD
+function formatDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// 计算两个日期之间的天数差
+function calculateDaysBetween(startDate, endDate) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const diffTime = Math.abs(end - start);
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return diffDays;
+}
+
+// 更新借阅总天数（由日期变化触发）
+function updateBorrowTotalDays() {
+  const startDate = $('borrowStartDate').value;
+  const endDate = $('borrowEndDate').value;
+  
+  if (startDate && endDate) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    // 校验：结束日期不可早于开始日期
+    if (end < start) {
+      toast('结束日期不可早于开始日期', 'error');
+      $('borrowEndDate').value = startDate;
+      $('borrowTotalDays').value = 0;
+      return;
+    }
+    
+    const days = calculateDaysBetween(startDate, endDate);
+    
+    // 校验：总天数限制1~90天
+    if (days < 1) {
+      toast('借阅天数至少为1天', 'error');
+      const newEndDate = new Date(start);
+      newEndDate.setDate(newEndDate.getDate() + 1);
+      $('borrowEndDate').value = formatDate(newEndDate);
+      $('borrowTotalDays').value = 1;
+      return;
+    }
+    
+    if (days > 90) {
+      toast('借阅天数最多为90天', 'error');
+      const newEndDate = new Date(start);
+      newEndDate.setDate(newEndDate.getDate() + 90);
+      $('borrowEndDate').value = formatDate(newEndDate);
+      $('borrowTotalDays').value = 90;
+      return;
+    }
+    
+    $('borrowTotalDays').value = days;
+  } else {
+    $('borrowTotalDays').value = '';
+  }
+}
+
+// 更新借阅结束日期（由天数变化触发）
+function updateBorrowEndDate() {
+  const startDate = $('borrowStartDate').value;
+  const daysInput = $('borrowTotalDays');
+  const days = parseInt(daysInput.value);
+  
+  if (!startDate) {
+    toast('请先选择借阅开始日期', 'error');
+    daysInput.value = '';
+    return;
+  }
+  
+  if (isNaN(days) || days < 1) {
+    toast('借阅天数至少为1天', 'error');
+    daysInput.value = 1;
+    const newEndDate = new Date(startDate);
+    newEndDate.setDate(newEndDate.getDate() + 1);
+    $('borrowEndDate').value = formatDate(newEndDate);
+    return;
+  }
+  
+  if (days > 90) {
+    toast('借阅天数最多为90天', 'error');
+    daysInput.value = 90;
+    const newEndDate = new Date(startDate);
+    newEndDate.setDate(newEndDate.getDate() + 90);
+    $('borrowEndDate').value = formatDate(newEndDate);
+    return;
+  }
+  
+  const newEndDate = new Date(startDate);
+  newEndDate.setDate(newEndDate.getDate() + days);
+  $('borrowEndDate').value = formatDate(newEndDate);
+}
+
 async function quickBorrow(bookId) {
   try {
     const bookData = await api(`/api/books/${bookId}`);
@@ -884,7 +1135,7 @@ async function quickBorrow(bookId) {
     }
     
     if (bookData.available_count <= 0) {
-      alert('该书暂无可借阅库存，无法借阅');
+      toast('暂无可借库存，可预约等候', 'error');
       return;
     }
 
@@ -897,11 +1148,21 @@ async function quickBorrow(bookId) {
     $('borrowConfirmTitle').textContent = bookData.title;
     $('borrowConfirmAuthor').textContent = bookData.author;
     $('borrowConfirmStock').textContent = bookData.available_count;
-    $('borrowConfirmDaysInput').value = 30;
+    
+    // 初始化日期选择器
+    const today = new Date();
+    const defaultEndDate = new Date(today);
+    defaultEndDate.setDate(defaultEndDate.getDate() + 7);
+    
+    $('borrowStartDate').value = formatDate(today);
+    $('borrowEndDate').value = formatDate(defaultEndDate);
+    $('borrowTotalDays').value = 7;
     
     $('borrowConfirmModal').classList.remove('hidden');
   } catch (e) {
-    toast(e.message || '操作失败', 'error');
+    const errorMsg = typeof e.message === 'string' ? e.message : 
+                     e.message?.detail || e.message?.message || JSON.stringify(e.message) || '操作失败';
+    toast(errorMsg, 'error');
   }
 }
 
@@ -917,21 +1178,22 @@ document.getElementById('borrowConfirmModal')?.addEventListener('click', functio
   }
 });
 
-document.getElementById('borrowConfirmDaysInput')?.addEventListener('blur', function(e) {
-  const input = e.target;
-  const value = parseInt(input.value);
-  
-  if (isNaN(value) || value < 1 || value > 90) {
-    input.value = 30;
-    toast('借阅天数必须是1-90之间的正整数', 'error');
-  }
-});
+// 日期选择器联动事件
+document.getElementById('borrowStartDate')?.addEventListener('change', updateBorrowTotalDays);
+document.getElementById('borrowEndDate')?.addEventListener('change', updateBorrowTotalDays);
+document.getElementById('borrowTotalDays')?.addEventListener('change', updateBorrowEndDate);
 
 async function confirmBorrow() {
   if (!pendingBorrowBookId) return;
 
-  const daysInput = $('borrowConfirmDaysInput');
-  const days = parseInt(daysInput.value);
+  const startDate = $('borrowStartDate').value;
+  const endDate = $('borrowEndDate').value;
+  const days = parseInt($('borrowTotalDays').value);
+  
+  if (!startDate || !endDate) {
+    toast('请选择借阅日期', 'error');
+    return;
+  }
   
   if (isNaN(days) || days < 1 || days > 90) {
     toast('借阅天数必须是1-90之间的正整数', 'error');
@@ -962,7 +1224,9 @@ async function confirmBorrow() {
       switchView('records');
     }
   } catch (e) {
-    toast(e.message || '借阅失败', 'error');
+    const errorMsg = typeof e.message === 'string' ? e.message : 
+                     e.message?.detail || e.message?.message || JSON.stringify(e.message) || '借阅失败';
+    toast(errorMsg, 'error');
     closeBorrowConfirmModal();
   } finally {
     btn.disabled = false;
@@ -1599,6 +1863,10 @@ async function loadReservations() {
   const status = encodeURIComponent($('reservationStatus').value || '');
   const keyword = encodeURIComponent($('reservationKeyword').value || '');
   const data = await api(`/api/reservations?status=${status}&keyword=${keyword}&page=${state.reservationPage}&page_size=8`);
+  
+  // 按ID降序排序，确保最新的预约在最前面
+  data.items.sort((a, b) => b.id - a.id);
+  
   $('reservationPageText').textContent = `第 ${data.page} 页 / 共 ${Math.max(1, Math.ceil(data.total / data.page_size))} 页`;
 
   const statusMap = { pending: '待处理', notified: '已通知', cancelled: '已取消' };
@@ -1683,6 +1951,7 @@ async function markMessageRead(messageId) {
   try {
     await api(`/api/messages/${messageId}/read`, { method: 'PATCH' });
     loadMessages();
+    updateUnreadBadge();
   } catch (e) {
     toast(e.message, 'error');
   }
@@ -1694,6 +1963,7 @@ async function markAllMessagesRead() {
     await api('/api/messages/read-all', { method: 'PATCH' });
     toast('所有消息已标记为已读', 'success');
     loadMessages();
+    updateUnreadBadge();
   } catch (e) {
     toast(e.message, 'error');
   }
@@ -1741,61 +2011,114 @@ async function loadOverdue() {
     $('overduePrev').disabled = pageData.page <= 1;
     $('overdueNext').disabled = pageData.page >= totalPages;
 
-    // 更新表格（样式与借还记录一致）
+    // 根据用户角色渲染不同的表格
+    const isReader = state.user.role === 'reader';
+
     if (items.length === 0) {
-      $('overdueTable').innerHTML = `
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>图书</th>
-            <th>读者</th>
-            <th>借出日期</th>
-            <th>应还日期</th>
-            <th>逾期天数</th>
-            <th>预估罚金</th>
-            <th>状态</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td colspan="9" style="text-align: center; padding: 40px; color: #94a3b8;">暂无逾期记录</td></tr>
-        </tbody>
-      `;
-    } else {
-      $('overdueTable').innerHTML = `
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>图书</th>
-            <th>读者</th>
-            <th>借出日期</th>
-            <th>应还日期</th>
-            <th>逾期天数</th>
-            <th>预估罚金</th>
-            <th>状态</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${items.map(r => {
-            const overdueDays = Math.round(r.overdue_days || 0);
-            return `
+      if (isReader) {
+        // 读者端：精简表格
+        $('overdueTable').innerHTML = `
+          <thead>
             <tr>
-              <td>${r.id}</td>
-              <td>${escapeHtml(r.book_title)}</td>
-              <td>${escapeHtml(r.reader_name)}</td>
-              <td>${r.borrow_date}</td>
-              <td>${r.due_date}</td>
-              <td class="${overdueDays > 14 ? 'text-danger' : overdueDays > 7 ? 'text-warning' : ''}">${overdueDays}</td>
-              <td>${r.fine_amount ? `<span class="text-danger">¥${r.fine_amount.toFixed(2)}</span>` : '-'}</td>
-              <td>${statusBadge(r.status)}</td>
-              <td>
-                <button class="primary small" onclick="notifyReminder(${r.id})">发送通知</button>
-              </td>
+              <th>图书名称</th>
+              <th>借出日期</th>
+              <th>应还日期</th>
+              <th>逾期天数</th>
+              <th>预估罚金</th>
+              <th>状态</th>
             </tr>
-            `}).join('')}
-        </tbody>
-      `;
+          </thead>
+          <tbody>
+            <tr><td colspan="6" style="text-align: center; padding: 40px; color: #94a3b8;">暂无逾期记录</td></tr>
+          </tbody>
+        `;
+      } else {
+        // 管理员/馆员：完整表格
+        $('overdueTable').innerHTML = `
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>图书</th>
+              <th>读者</th>
+              <th>借出日期</th>
+              <th>应还日期</th>
+              <th>逾期天数</th>
+              <th>预估罚金</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="9" style="text-align: center; padding: 40px; color: #94a3b8;">暂无逾期记录</td></tr>
+          </tbody>
+        `;
+      }
+    } else {
+      if (isReader) {
+        // 读者端：精简表格
+        $('overdueTable').innerHTML = `
+          <thead>
+            <tr>
+              <th>图书名称</th>
+              <th>借出日期</th>
+              <th>应还日期</th>
+              <th>逾期天数</th>
+              <th>预估罚金</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map(r => {
+              const overdueDays = Math.round(r.overdue_days || 0);
+              return `
+              <tr>
+                <td>${escapeHtml(r.book_title)}</td>
+                <td>${r.borrow_date}</td>
+                <td>${r.due_date}</td>
+                <td class="${overdueDays > 14 ? 'text-danger' : overdueDays > 7 ? 'text-warning' : ''}">${overdueDays}</td>
+                <td>${r.fine_amount ? `<span class="text-danger">¥${r.fine_amount.toFixed(2)}</span>` : '-'}</td>
+                <td>${statusBadge(r.status)}</td>
+              </tr>
+              `}).join('')}
+          </tbody>
+        `;
+      } else {
+        // 管理员/馆员：完整表格
+        $('overdueTable').innerHTML = `
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>图书</th>
+              <th>读者</th>
+              <th>借出日期</th>
+              <th>应还日期</th>
+              <th>逾期天数</th>
+              <th>预估罚金</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map(r => {
+              const overdueDays = Math.round(r.overdue_days || 0);
+              return `
+              <tr>
+                <td>${r.id}</td>
+                <td>${escapeHtml(r.book_title)}</td>
+                <td>${escapeHtml(r.reader_name)}</td>
+                <td>${r.borrow_date}</td>
+                <td>${r.due_date}</td>
+                <td class="${overdueDays > 14 ? 'text-danger' : overdueDays > 7 ? 'text-warning' : ''}">${overdueDays}</td>
+                <td>${r.fine_amount ? `<span class="text-danger">¥${r.fine_amount.toFixed(2)}</span>` : '-'}</td>
+                <td>${statusBadge(r.status)}</td>
+                <td>
+                  <button class="primary small" onclick="notifyReminder(${r.id})">发送通知</button>
+                </td>
+              </tr>
+              `}).join('')}
+          </tbody>
+        `;
+      }
     }
 
     // 更新提醒消息区（移除 emoji 图标，用分隔线）
@@ -1935,7 +2258,6 @@ async function loadRecommendations() {
 
     renderRecommendation('recCategory', recs.by_category, '根据您常借阅的图书分类推荐');
     renderRecommendation('recPopular', recs.by_popular, '热门借阅榜推荐');
-    renderRecommendation('recRating', recs.by_rating, '高分书评推荐');
     renderRecommendation('recDepartment', recs.by_department, '根据您的专业推荐');
   } catch (e) {
     console.error('Failed to load recommendations:', e);
@@ -1964,34 +2286,23 @@ function renderRecommendation(containerId, items, reason) {
       <div style="color: #94a3b8; font-size: 12px;">ISBN: ${escapeHtml(book.isbn)}</div>
       <div class="rec-reason">${reason}</div>
       <div class="rec-actions">
-        <button class="primary small" onclick="borrowRecommendedBook(${book.id}, '${escapeHtml(book.title)}')">借阅</button>
-        <button class="ghost small" onclick="reserveRecommendedBook(${book.id}, '${escapeHtml(book.title)}')">预约</button>
+        <button class="primary small" onclick="borrowRecommendedBook(${book.id})">借阅</button>
+        <button class="ghost small" onclick="reserveRecommendedBook(${book.id})">预约</button>
       </div>
     </div>
   `).join('');
 }
 
-// 借阅推荐图书
+// 借阅推荐图书（直接调用借阅流程）
 async function borrowRecommendedBook(bookId, bookTitle) {
-  switchView('records');
-  setTimeout(() => {
-    $('borrowBook').value = bookId;
-    toast(`已选择《${bookTitle}》，请确认借阅信息`, 'success');
-  }, 100);
+  // 直接调用图书管理页面的借阅功能
+  quickBorrow(bookId);
 }
 
-// 预约推荐图书
-async function reserveRecommendedBook(bookId, bookTitle) {
-  if (!confirm(`确认预约《${bookTitle}》？当图书归还时，您将收到通知。`)) return;
-  try {
-    await api('/api/reservations', {
-      method: 'POST',
-      body: JSON.stringify({ book_id: bookId, reader_id: state.user.id })
-    });
-    toast('预约成功！当图书归还时您将收到通知', 'success');
-  } catch (e) {
-    toast(e.message, 'error');
-  }
+// 预约推荐图书（与图书管理页面预约逻辑一致）
+async function reserveRecommendedBook(bookId) {
+  // 直接调用图书管理页面的预约功能
+  quickReserve(bookId);
 }
 
 async function loadReportReaders() {

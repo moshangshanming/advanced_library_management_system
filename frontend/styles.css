@@ -91,7 +91,33 @@ body {
   position: relative;
 }
 .nav:hover { background: linear-gradient(135deg, rgba(184, 134, 11, 0.25) 0%, rgba(212, 168, 75, 0.2) 100%); transform: translateY(-2px) translateX(4px); box-shadow: 0 6px 16px rgba(184, 134, 11, 0.15); color: var(--accent); }
-.nav.active { background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.03); color: var(--primary-dark); font-weight: 600; }
+.nav.active { background: linear-gradient(135deg, rgba(184, 134, 11, 0.15) 0%, rgba(212, 168, 75, 0.1) 100%); box-shadow: 0 2px 8px rgba(184, 134, 11, 0.2); color: var(--accent); font-weight: 700; border: 1px solid rgba(184, 134, 11, 0.3); }
+
+/* 侧边栏未读角标 */
+.sidebar-unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: #ef4444;
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 9px;
+  margin-left: 8px;
+  animation: badge-pulse 2s ease-in-out infinite;
+}
+
+.sidebar-unread-badge.hidden {
+  display: none;
+}
+
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
 
 .nav-group {
   width: 100%;
@@ -836,16 +862,23 @@ button.loading {
 }
 
 .borrow-confirm-modal {
-  max-width: 480px;
+  max-width: 720px;
 }
 
 .borrow-confirm-content {
   display: flex;
+  flex-direction: column;
   gap: 20px;
   padding: 10px 0;
 }
 
-.borrow-confirm-content img {
+.borrow-confirm-header {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+.borrow-confirm-header img {
   width: 100px;
   height: 140px;
   object-fit: cover;
@@ -858,11 +891,14 @@ button.loading {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
 }
 
 .borrow-confirm-info h4 {
   margin: 0;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
   color: #334155;
 }
@@ -873,16 +909,15 @@ button.loading {
   color: #64748b;
 }
 
-.borrow-confirm-stock,
-.borrow-confirm-days {
+.borrow-confirm-stock {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 13px;
+  margin-top: 8px;
 }
 
-.borrow-confirm-stock .stock-label,
-.borrow-confirm-days .days-label {
+.borrow-confirm-stock .stock-label {
   color: #94a3b8;
 }
 
@@ -891,27 +926,131 @@ button.loading {
   font-weight: 600;
 }
 
-.borrow-confirm-days input {
+/* 借阅日期选择器样式 */
+.borrow-confirm-date-group {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-top: 12px;
+  width: 100%;
+  align-items: center;
+  padding-top: 20px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.borrow-confirm-date-group .date-row {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+}
+
+.borrow-confirm-date-group .date-row.double {
+  gap: 20px;
+  justify-content: center;
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  max-width: 450px;
+}
+
+.borrow-confirm-date-group .date-row.double .date-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.borrow-confirm-date-group .date-row.single {
+  gap: 10px;
+  justify-content: center;
+}
+
+.borrow-confirm-date-group .date-label {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.borrow-confirm-date-group .date-row.single .date-label {
+  min-width: 85px;
+  text-align: right;
+}
+
+.borrow-confirm-date-group input[type="date"],
+.borrow-confirm-date-group input[type="number"] {
+  padding: 10px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.borrow-confirm-date-group .date-row.double input[type="date"] {
+  width: 100%;
+}
+
+.borrow-confirm-date-group input[type="number"] {
   width: 80px;
-  padding: 6px 10px;
+  text-align: center;
+  color: #334155;
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.borrow-confirm-date-group input[type="date"]:focus,
+.borrow-confirm-date-group input[type="number"]:focus {
+  border-color: #b8860b;
+  box-shadow: 0 0 0 2px rgba(184, 134, 11, 0.15);
+}
+
+.borrow-confirm-date-group .days-unit {
+  color: #64748b;
+  min-width: 24px;
+  font-size: 14px;
+}
+
+/* 预约确认弹窗样式 */
+.reserve-confirm-tip {
+  color: #f59e0b !important;
+  font-size: 13px !important;
+  background: rgba(245, 158, 11, 0.1);
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-top: 4px;
+}
+
+.reserve-confirm-phone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.reserve-confirm-phone .phone-label {
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.reserve-confirm-phone input {
+  flex: 1;
+  padding: 8px 12px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   font-size: 13px;
-  text-align: center;
   outline: none;
   transition: border-color 0.2s;
 }
 
-.borrow-confirm-days input:focus {
+.reserve-confirm-phone input:focus {
   border-color: #b8860b;
 }
 
-.borrow-confirm-days input:invalid {
-  border-color: #ef4444;
-}
-
-.borrow-confirm-days .days-unit {
-  color: #64748b;
+.reserve-confirm-phone input::placeholder {
+  color: #94a3b8;
 }
 
 .modal-header {
@@ -965,6 +1104,10 @@ button.loading {
   padding: 20px 24px;
   border-top: 1px solid rgba(0, 0, 0, 0.08);
   background: rgba(248, 250, 252, 1);
+}
+
+.modal-footer.center {
+  justify-content: center;
 }
 
 /* 公告详情弹窗样式 */
@@ -2698,9 +2841,9 @@ th:last-child {
 
 .book-detail-header-row {
   display: flex;
-  align-items: center;
-  gap: 28px;
-  margin-bottom: 24px;
+  align-items: flex-start;
+  gap: 24px;
+  margin-bottom: 20px;
 }
 
 .book-detail-cover-section {
@@ -2751,32 +2894,25 @@ th:last-child {
   display: none;
 }
 
-.book-detail-title-section {
+.book-detail-right-section {
   flex: 1;
   min-width: 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding-left: 20px;
-  min-height: 280px;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .book-detail-header {
   width: 100%;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #eee;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  flex: 1;
-  justify-content: center;
-  text-align: center;
+  gap: 4px;
 }
 
 .book-detail-header h2 {
   font-size: 1.5rem;
   font-weight: 600;
-  margin-bottom: 8px;
+  margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2785,6 +2921,7 @@ th:last-child {
 .detail-author {
   color: var(--accent);
   font-size: 1rem;
+  margin: 0;
 }
 
 .book-detail-main {
@@ -2800,7 +2937,7 @@ th:last-child {
 }
 
 .book-detail-meta-section h4 {
-  margin-bottom: 12px;
+  margin: 0 0 12px 0;
   font-size: 0.95rem;
   font-weight: 600;
   color: var(--foreground);

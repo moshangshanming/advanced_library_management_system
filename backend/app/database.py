@@ -71,6 +71,10 @@ class DatabaseManager:
                 conn.execute("ALTER TABLE borrow_records ADD COLUMN fine_paid INTEGER NOT NULL DEFAULT 0")
             except sqlite3.OperationalError:
                 pass
+            try:
+                conn.execute("ALTER TABLE books ADD COLUMN reserve_count INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
             
             conn.executescript(
                 """
@@ -189,6 +193,36 @@ class DatabaseManager:
                 CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
                 CREATE INDEX IF NOT EXISTS idx_reviews_book ON book_reviews(book_id);
                 CREATE INDEX IF NOT EXISTS idx_reviews_reader ON book_reviews(reader_id);
+
+                CREATE TABLE IF NOT EXISTS book_reservations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    book_id INTEGER NOT NULL,
+                    reader_id INTEGER NOT NULL,
+                    reserve_date TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'notified', 'cancelled')),
+                    phone TEXT DEFAULT '',
+                    notified INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                    FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE,
+                    FOREIGN KEY(reader_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    type TEXT NOT NULL DEFAULT 'info',
+                    read INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_reservations_book ON book_reservations(book_id);
+                CREATE INDEX IF NOT EXISTS idx_reservations_reader ON book_reservations(reader_id);
+                CREATE INDEX IF NOT EXISTS idx_reservations_status ON book_reservations(status);
+                CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id);
+                CREATE INDEX IF NOT EXISTS idx_messages_read ON messages(read);
 
                 CREATE VIEW IF NOT EXISTS v_borrow_detail AS
                 SELECT

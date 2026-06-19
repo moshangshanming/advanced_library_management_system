@@ -95,8 +95,8 @@
         </div>
         <div class="nav-group-content">
           <button data-view="records" class="nav">借还记录</button>
+          <button data-view="overdue" class="nav">逾期提醒</button>
           <button data-view="reservations" class="nav">预约管理</button>
-          <button data-view="overdue" class="nav staff-only">逾期提醒</button>
           <button data-view="reports" class="nav">读书报告</button>
         </div>
       </div>
@@ -109,7 +109,7 @@
           <button data-view="audit" class="nav admin-only">操作日志</button>
         </div>
       </div>
-      <button data-view="messages" class="nav">我的消息</button>
+      <button data-view="messages" class="nav">我的消息<span id="sidebarUnreadBadge" class="sidebar-unread-badge hidden"></span></button>
     </aside>
 
     <section class="workspace">
@@ -742,10 +742,6 @@
               <h4>热门借阅榜推荐</h4>
               <div id="recPopular" class="rec-list"></div>
             </div>
-            <div class="recommendation-section-vertical" data-recommend-type="rating" title="基于读者评分和评论数据，推荐高质量高分图书">
-              <h4>高分书评推荐</h4>
-              <div id="recRating" class="rec-list"></div>
-            </div>
             <div class="recommendation-section-vertical" data-recommend-type="department" title="基于读者所属院系/专业，推荐相关学科图书">
               <h4>专业相关推荐</h4>
               <div id="recDepartment" class="rec-list"></div>
@@ -775,8 +771,8 @@
           </div>
         </div>
 
-        <!-- 逾期提醒中心面板 -->
-        <div class="panel overdue-panel">
+        <!-- 管理员/馆员：逾期提醒中心面板 -->
+        <div class="panel overdue-panel staff-only">
           <div class="panel-title">
             <h3>逾期提醒中心</h3>
             <span>自动扫描逾期记录并生成提醒消息</span>
@@ -887,43 +883,43 @@
               <span>更换封面</span>
             </label>
           </div>
-          <div class="book-detail-title-section">
+          <div class="book-detail-right-section">
             <div class="book-detail-header">
               <h2 id="detailTitle">书名</h2>
               <p id="detailAuthor" class="detail-author">作者</p>
             </div>
-          </div>
-        </div>
-        <div class="book-detail-main">
-          <div class="book-detail-meta-section">
-            <h4>基础信息</h4>
-            <div class="detail-meta">
-              <div class="meta-row">
-                <span class="meta-label">ISBN:</span>
-                <span id="detailIsbn" class="meta-value"></span>
-              </div>
-              <div class="meta-row">
-                <span class="meta-label">出版社:</span>
-                <span id="detailPublisher" class="meta-value"></span>
-              </div>
-              <div class="meta-row">
-                <span class="meta-label">分类:</span>
-                <span id="detailCategory" class="meta-value"></span>
-              </div>
-              <div class="meta-row">
-                <span class="meta-label">书架位置:</span>
-                <span id="detailShelf" class="meta-value"></span>
-              </div>
-              <div class="meta-row">
-                <span class="meta-label">库存:</span>
-                <span id="detailStock" class="meta-value highlight"></span>
-              </div>
-              <div class="meta-row">
-                <span class="meta-label">借阅次数:</span>
-                <span id="detailBorrowCount" class="meta-value"></span>
+            <div class="book-detail-meta-section">
+              <h4>基础信息</h4>
+              <div class="detail-meta">
+                <div class="meta-row">
+                  <span class="meta-label">ISBN:</span>
+                  <span id="detailIsbn" class="meta-value"></span>
+                </div>
+                <div class="meta-row">
+                  <span class="meta-label">出版社:</span>
+                  <span id="detailPublisher" class="meta-value"></span>
+                </div>
+                <div class="meta-row">
+                  <span class="meta-label">分类:</span>
+                  <span id="detailCategory" class="meta-value"></span>
+                </div>
+                <div class="meta-row">
+                  <span class="meta-label">书架位置:</span>
+                  <span id="detailShelf" class="meta-value"></span>
+                </div>
+                <div class="meta-row">
+                  <span class="meta-label">库存:</span>
+                  <span id="detailStock" class="meta-value highlight"></span>
+                </div>
+                <div class="meta-row">
+                  <span class="meta-label">借阅次数:</span>
+                  <span id="detailBorrowCount" class="meta-value"></span>
+                </div>
               </div>
             </div>
           </div>
+        </div>
+        <div class="book-detail-main">
           <div class="book-detail-desc-section">
             <h4><strong>简介:</strong></h4>
             <div class="detail-description">
@@ -950,17 +946,31 @@
       </div>
       <div class="modal-body">
         <div class="borrow-confirm-content">
-          <img id="borrowConfirmCover" src="/static/placeholder-cover.png" alt="图书封面" />
-          <div class="borrow-confirm-info">
-            <h4 id="borrowConfirmTitle"></h4>
-            <p id="borrowConfirmAuthor"></p>
-            <div class="borrow-confirm-stock">
-              <span class="stock-label">可借库存:</span>
-              <span id="borrowConfirmStock"></span>
+          <div class="borrow-confirm-header">
+            <img id="borrowConfirmCover" src="/static/placeholder-cover.png" alt="图书封面" />
+            <div class="borrow-confirm-info">
+              <h4 id="borrowConfirmTitle"></h4>
+              <p id="borrowConfirmAuthor"></p>
+              <div class="borrow-confirm-stock">
+                <span class="stock-label">可借库存:</span>
+                <span id="borrowConfirmStock"></span>
+              </div>
             </div>
-            <div class="borrow-confirm-days">
-              <span class="days-label">借阅期限:</span>
-              <input type="number" id="borrowConfirmDaysInput" min="1" max="90" value="30" placeholder="请输入天数" />
+          </div>
+          <div class="borrow-confirm-date-group">
+            <div class="date-row double">
+              <div class="date-field">
+                <span class="date-label">借阅开始日期:</span>
+                <input type="date" id="borrowStartDate" />
+              </div>
+              <div class="date-field">
+                <span class="date-label">借阅结束日期:</span>
+                <input type="date" id="borrowEndDate" />
+              </div>
+            </div>
+            <div class="date-row single">
+              <span class="date-label">借阅总天数:</span>
+              <input type="number" id="borrowTotalDays" min="1" max="90" value="7" />
               <span class="days-unit">天</span>
             </div>
           </div>

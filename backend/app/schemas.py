@@ -182,6 +182,7 @@ class RenewRequest(BaseModel):
 class ReservationCreate(BaseModel):
     book_id: int = Field(..., ge=1)
     reader_id: Optional[int] = Field(default=None, ge=1)
+    phone: Optional[str] = Field(default="", max_length=20)
 
 
 class Reservation(BaseModel):

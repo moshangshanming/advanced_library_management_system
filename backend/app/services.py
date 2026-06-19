@@ -280,8 +280,8 @@ class BorrowService:
         book = db_manager.fetch_one("SELECT * FROM books WHERE id = ?", (data.book_id,))
         if not book:
             raise HTTPException(status_code=404, detail="图书不存在。")
-        if book["status"] != "available":
-            raise HTTPException(status_code=400, detail="该图书已下架或不可借阅。")
+        if book["available_count"] <= 0:
+            raise HTTPException(status_code=400, detail="该图书库存不足，暂时无法借阅。")
         
         with db_manager.transaction() as conn:
             book_locked = conn.execute("SELECT available_count FROM books WHERE id = ?", (data.book_id,)).fetchone()
@@ -561,7 +561,7 @@ class BorrowService:
         
         return self.get_record(record_id, current_user)
 
-    def create_reservation(self, book_id: int, reader_id: int, current_user: Dict[str, Any]) -> Dict[str, Any]:
+    def create_reservation(self, book_id: int, reader_id: int, current_user: Dict[str, Any], phone: str = "") -> Dict[str, Any]:
         """创建预约"""
         # 确定读者ID
         if current_user["role"] == "reader":
@@ -591,7 +591,7 @@ class BorrowService:
             (book_id, reader_id)
         )
         if existing:
-            raise HTTPException(status_code=400, detail="您已经预约了这本图书。")
+            raise HTTPException(status_code=400, detail="您已预约本书，请勿重复操作。")
         
         # 创建预约记录
         cursor = db_manager.execute(
@@ -599,6 +599,21 @@ class BorrowService:
             (book_id, reader_id, date.today().isoformat())
         )
         reservation_id = cursor.lastrowid
+        
+        # 更新图书预约人数
+        db_manager.execute(
+            "UPDATE books SET reserve_count = reserve_count + 1 WHERE id = ?",
+            (book_id,)
+        )
+        
+        # 记录操作日志
+        audit_log_service.log_action(
+            user_id=current_user["id"],
+            action="RESERVE",
+            target_type="book",
+            target_id=book_id,
+            details=f"预约图书《{book['title']}》"
+        )
         
         return self.get_reservation(reservation_id)
 
@@ -646,7 +661,7 @@ class BorrowService:
             JOIN books b ON r.book_id = b.id
             JOIN users u ON r.reader_id = u.id
             {where_sql}
-            ORDER BY r.reserve_date ASC
+            ORDER BY r.id DESC
             LIMIT ? OFFSET ?
         """, tuple(params + [page_size, offset]))
         
@@ -664,7 +679,7 @@ class BorrowService:
         return {"message": "预约已取消。"}
 
     def process_reservations(self, book_id: int) -> None:
-        """处理预约（当图书归还时自动通知预约用户）"""
+        """处理预约（当图书归还时自动通知所有预约用户）"""
         # 获取该图书的所有待处理预约
         reservations = db_manager.fetch_all("""
             SELECT r.*, b.title AS book_title, u.username AS reader_username 
@@ -676,19 +691,20 @@ class BorrowService:
         """, (book_id,))
         
         if reservations:
-            # 更新第一个预约为已通知状态
-            db_manager.execute(
-                "UPDATE book_reservations SET status = 'notified', notified = 1 WHERE id = ?",
-                (reservations[0]["id"],)
-            )
-            
-            # 发送消息给读者
-            message_service.send_message(
-                user_id=reservations[0]["reader_id"],
-                title="预约图书已到馆",
-                content=f"您预约的图书《{reservations[0]['book_title']}》已到馆，请尽快到图书馆借阅。",
-                msg_type="reservation"
-            )
+            for reservation in reservations:
+                # 更新预约状态为已通知
+                db_manager.execute(
+                    "UPDATE book_reservations SET status = 'notified', notified = 1 WHERE id = ?",
+                    (reservation["id"],)
+                )
+                
+                # 发送消息给读者
+                message_service.send_message(
+                    user_id=reservation["reader_id"],
+                    title="图书预约通知",
+                    content=f"您预约的《{reservation['book_title']}》已有可借库存，可前往借阅。",
+                    msg_type="reservation"
+                )
 
 
 class StatsService:
@@ -1199,25 +1215,6 @@ class RecommendationService:
         )
         return rows
 
-    def recommend_by_rating(self, reader_id: int, limit: int = 5) -> List[Dict[str, Any]]:
-        """根据评分和评论推荐高质量图书"""
-        rows = db_manager.fetch_all(
-            """
-            SELECT b.*, AVG(br.rating) as avg_rating, COUNT(br.id) as review_count
-            FROM books b
-            LEFT JOIN book_reviews br ON b.id = br.book_id
-            WHERE b.id NOT IN (
-                SELECT book_id FROM borrow_records WHERE reader_id = ?
-            )
-            AND br.rating IS NOT NULL
-            GROUP BY b.id
-            ORDER BY avg_rating DESC, review_count DESC
-            LIMIT ?
-            """,
-            (reader_id, limit),
-        )
-        return rows
-
     def recommend_by_department(self, reader_id: int, limit: int = 5) -> List[Dict[str, Any]]:
         """根据专业或院系推荐相关书籍"""
         # 获取读者的部门/专业
@@ -1234,14 +1231,44 @@ class RecommendationService:
             JOIN borrow_records br ON b.id = br.book_id
             JOIN users u ON br.reader_id = u.id
             WHERE u.department = ?
+            AND br.reader_id != ?
             AND b.id NOT IN (
                 SELECT book_id FROM borrow_records WHERE reader_id = ?
             )
             ORDER BY b.updated_at DESC
             LIMIT ?
             """,
-            (department, reader_id, limit),
+            (department, reader_id, reader_id, limit),
         )
+        
+        # 如果没有同专业其他读者的数据，返回该专业相关分类的图书作为备选
+        if not rows:
+            # 获取当前读者借阅过的分类
+            categories = db_manager.fetch_all(
+                """
+                SELECT DISTINCT b.category FROM books b
+                JOIN borrow_records br ON b.id = br.book_id
+                WHERE br.reader_id = ?
+                """,
+                (reader_id,),
+            )
+            
+            if categories:
+                category_list = [c["category"] for c in categories]
+                placeholders = ",".join("?" * len(category_list))
+                rows = db_manager.fetch_all(
+                    f"""
+                    SELECT b.* FROM books b
+                    WHERE b.category IN ({placeholders})
+                    AND b.id NOT IN (
+                        SELECT book_id FROM borrow_records WHERE reader_id = ?
+                    )
+                    ORDER BY b.updated_at DESC
+                    LIMIT ?
+                    """,
+                    tuple(category_list + [reader_id, limit]),
+                )
+        
         return rows
 
     def get_all_recommendations(self, reader_id: int) -> Dict[str, List[Dict[str, Any]]]:
@@ -1249,7 +1276,6 @@ class RecommendationService:
         return {
             "by_category": self.recommend_by_category(reader_id),
             "by_popular": self.recommend_by_popular(reader_id),
-            "by_rating": self.recommend_by_rating(reader_id),
             "by_department": self.recommend_by_department(reader_id),
         }
 
