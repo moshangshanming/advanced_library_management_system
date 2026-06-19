@@ -3319,8 +3319,22 @@ select + input {
   place-items: center !important;
   border-radius: 12px !important;
   background: var(--accent) !important;
-  color: #3f2f0a !important;
+  color: #ffffff !important;
   font-size: 1.8rem !important;
   font-weight: 800 !important;
   line-height: 1 !important;
+}
+
+.login-card > .brand-mark {
+  width: 56px !important;
+  height: 56px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: var(--accent) !important;
+  color: #ffffff !important;
+  font-size: 2.25rem !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  padding-bottom: 3px;
 }
