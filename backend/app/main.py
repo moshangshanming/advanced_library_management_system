@@ -70,6 +70,19 @@ def index():
     return {"message": APP_NAME}
 
 
+@app.get("/vite.svg", include_in_schema=False)
+def vite_icon():
+    icon_path = FRONTEND_DIR / "favicon.svg"
+    if icon_path.exists():
+        return FileResponse(icon_path)
+    return {"message": APP_NAME}
+
+
+@app.get("/.well-known/appspecific/com.chrome.devtools.json", include_in_schema=False)
+def chrome_devtools_config():
+    return {}
+
+
 def get_current_user(authorization: str = Header(default="")) -> Dict[str, Any]:
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录。")

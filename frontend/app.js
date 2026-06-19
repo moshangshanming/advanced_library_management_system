@@ -350,11 +350,15 @@ function drawPie(canvasId, items) {
   const availableWidth = width - legendX - 10;
 
   // 根据可用宽度调整字体大小
-  const fontSize = availableWidth < 150 ? 10 : 11;
-  const lineHeight = fontSize + 8;
+  const legendPaddingY = 10;
+  const baseFontSize = availableWidth < 150 ? 10 : 11;
+  const maxLineHeight = baseFontSize + 8;
+  const lineHeight = Math.max(12, Math.min(maxLineHeight, Math.floor((height - legendPaddingY * 2) / sortedItems.length)));
+  const fontSize = Math.min(baseFontSize, Math.max(9, lineHeight - 6));
   const boxSize = fontSize + 2;
 
-  const legendStartY = cy - (sortedItems.length * lineHeight) / 2;
+  const legendHeight = sortedItems.length * lineHeight;
+  const legendStartY = Math.max(legendPaddingY, cy - legendHeight / 2);
   ctx.font = `bold ${fontSize}px "Source Sans 3", sans-serif`;
 
   for (let i = 0; i < sortedItems.length; i++) {
@@ -2458,6 +2462,19 @@ function updateReportButtonStates() {
   $('downloadReportPdfBtn').style.cursor = hasReport ? 'pointer' : 'not-allowed';
 }
 
+function getReportToastReaderName() {
+  if (state.user.role === 'reader') {
+    return state.user.username || state.user.full_name || '该读者';
+  }
+
+  const readerSelect = $('reportReader');
+  if (readerSelect && readerSelect.options) {
+    return readerSelect.options[readerSelect.selectedIndex]?.text || '该读者';
+  }
+
+  return state.user.username || state.user.full_name || '该读者';
+}
+
 // 带加载动画的报告生成
 async function generateReportWithLoading() {
   // 读者端使用当前登录用户的ID，管理员端使用选择的读者ID
@@ -2508,13 +2525,7 @@ async function generateReportWithLoading() {
     renderReport(report);
     updateReportButtonStates();
 
-    // 获取读者姓名用于toast
-    let readerName = state.user.name || state.user.username || '该读者';
-    const readerSelect = $('reportReader');
-    if (readerSelect && readerSelect.options) {
-      readerName = readerSelect.options[readerSelect.selectedIndex]?.text || readerName;
-    }
-
+    const readerName = getReportToastReaderName();
     toast(`读者「${readerName}」的读书报告已生成，可在线预览或下载`, 'success');
   } catch (err) {
     toast(err.message, 'error');
