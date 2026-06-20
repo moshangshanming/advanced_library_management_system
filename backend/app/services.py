@@ -1,7 +1,7 @@
 import csv
 import io
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, status
@@ -194,16 +194,20 @@ class ReaderService:
         return {"items": rows, "total": total, "page": page, "page_size": page_size}
 
     def create_reader(self, data: ReaderCreate) -> Dict[str, Any]:
+        from datetime import datetime
         try:
             user_id = db_manager.execute(
                 """
-                INSERT INTO users(username, password_hash, role, full_name, phone, email, department, status)
-                VALUES (?, ?, 'reader', ?, ?, ?, ?, ?)
+                INSERT INTO users(username, password_hash, role, full_name, phone, email, department, status, created_at)
+                VALUES (?, ?, 'reader', ?, ?, ?, ?, ?, ?)
                 """,
-                (data.username.strip(), hash_password(data.password), data.full_name.strip(), data.phone.strip(), data.email.strip(), data.department.strip(), data.status),
+                (data.username.strip(), hash_password(data.password), data.full_name.strip(), data.phone.strip(), data.email.strip(), data.department.strip(), getattr(data, 'status', 'active'), datetime.now().isoformat()),
             )
-        except sqlite3.IntegrityError:
-            raise HTTPException(status_code=400, detail="用户名已存在。")
+        except sqlite3.IntegrityError as e:
+            if "username" in str(e).lower() or "unique" in str(e).lower():
+                raise HTTPException(status_code=400, detail="用户名已存在。")
+            else:
+                raise HTTPException(status_code=400, detail=f"数据库错误: {str(e)}")
         return self.get_reader(user_id)
 
     def get_reader(self, reader_id: int) -> Dict[str, Any]:
@@ -304,7 +308,19 @@ class BorrowService:
             
             conn.execute("UPDATE books SET available_count = available_count - 1, updated_at = datetime('now', 'localtime') WHERE id = ?", (data.book_id,))
             
-            borrow_date = date.today()
+            # 检查库存是否低于预警阈值（使用事务内的连接）
+            new_count = conn.execute("SELECT available_count FROM books WHERE id = ?", (data.book_id,)).fetchone()["available_count"]
+            if new_count <= 1:
+                self._notify_admins_about_low_stock(book, new_count)
+            
+            # 使用传入的借阅日期，如果没有则使用当前日期
+            if data.borrow_date:
+                try:
+                    borrow_date = datetime.strptime(data.borrow_date, "%Y-%m-%d").date()
+                except ValueError:
+                    borrow_date = date.today()
+            else:
+                borrow_date = date.today()
             due_date = borrow_date + timedelta(days=data.days)
             cursor = conn.execute(
                 """
@@ -314,6 +330,19 @@ class BorrowService:
                 (data.book_id, reader_id, borrow_date.isoformat(), due_date.isoformat(), data.remark.strip()),
             )
             record_id = cursor.lastrowid
+        
+        # 发送借阅成功消息给读者（放在 try-catch 中，避免消息发送失败影响借阅）
+        try:
+            book_info = db_manager.fetch_one("SELECT title FROM books WHERE id = ?", (data.book_id,))
+            message_service.send_message(
+                user_id=reader_id,
+                title="借阅成功",
+                content=f"您已成功借阅《{book_info['title']}》，应还日期：{due_date.isoformat()}。请按时归还！",
+                msg_type="borrow"
+            )
+        except Exception as e:
+            # 消息发送失败不影响借阅操作
+            pass
         
         return self.get_record(record_id, current_user)
 
@@ -559,7 +588,22 @@ class BorrowService:
             (f'+{days} days', f'续借{days}天', record_id)
         )
         
-        return self.get_record(record_id, current_user)
+        # 获取更新后的记录以获取新的到期日期
+        updated_record = self.get_record(record_id, current_user)
+        
+        # 发送续借成功消息给读者（放在 try-catch 中，避免消息发送失败影响续借）
+        try:
+            message_service.send_message(
+                user_id=record["reader_id"],
+                title="续借成功",
+                content=f"您已成功续借《{record['book_title']}》，新的应还日期：{updated_record['due_date']}。",
+                msg_type="borrow"
+            )
+        except Exception as e:
+            # 消息发送失败不影响续借操作
+            pass
+        
+        return updated_record
 
     def create_reservation(self, book_id: int, reader_id: int, current_user: Dict[str, Any], phone: str = "") -> Dict[str, Any]:
         """创建预约"""
@@ -614,6 +658,9 @@ class BorrowService:
             target_id=book_id,
             details=f"预约图书《{book['title']}》"
         )
+        
+        # 向管理员发送预约通知
+        self._notify_admins_about_reservation(book, reader)
         
         return self.get_reservation(reservation_id)
 
@@ -1159,6 +1206,31 @@ class ReaderBulkImportService:
             """
         )
         return export_service.to_csv(rows)
+
+    def _notify_admins_about_reservation(self, book: Dict[str, Any], reader: Dict[str, Any]) -> None:
+        """向所有管理员发送预约通知"""
+        admins = db_manager.fetch_all("SELECT id, full_name FROM users WHERE role IN ('admin', 'librarian')")
+        reader_info = db_manager.fetch_one("SELECT full_name, username FROM users WHERE id = ?", (reader["id"],))
+        
+        for admin in admins:
+            message_service.send_message(
+                user_id=admin["id"],
+                title="新预约通知",
+                content=f"读者「{reader_info['full_name']}（{reader_info['username']}）」预约了图书《{book['title']}》",
+                msg_type="reservation"
+            )
+
+    def _notify_admins_about_low_stock(self, book: Dict[str, Any], current_count: int) -> None:
+        """向所有管理员发送库存预警通知"""
+        admins = db_manager.fetch_all("SELECT id, full_name FROM users WHERE role IN ('admin', 'librarian')")
+        
+        for admin in admins:
+            message_service.send_message(
+                user_id=admin["id"],
+                title="图书库存预警",
+                content=f"图书《{book['title']}》库存不足，当前库存：{current_count} 本，请及时补充。",
+                msg_type="info"
+            )
 
 
 class RecommendationService:

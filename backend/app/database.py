@@ -242,7 +242,7 @@ class DatabaseManager:
                     r.fine_amount,
                     r.fine_paid,
                     CAST(julianday('now') - julianday(r.due_date) AS INTEGER) AS overdue_days,
-                    CAST((julianday('now') - julianday(r.borrow_date)) AS INTEGER) AS borrow_duration_days
+                    CAST((julianday(r.due_date) - julianday(r.borrow_date)) AS INTEGER) AS borrow_duration_days
                 FROM borrow_records r
                 JOIN books b ON r.book_id = b.id
                 JOIN users u ON r.reader_id = u.id;

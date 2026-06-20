@@ -463,13 +463,16 @@ def notify_reservation(reservation_id: int, current_user: Dict[str, Any] = Depen
         (reservation_id,)
     )
     
-    # 发送消息给读者
-    message_service.send_message(
-        user_id=reservation["reader_id"],
-        title="预约图书已到馆",
-        content=f"您预约的图书《{book['title']}》已到馆，请尽快到图书馆借阅。",
-        msg_type="reservation"
-    )
+    # 发送消息给读者（放在 try-catch 中，消息发送失败不影响通知操作）
+    try:
+        message_service.send_message(
+            user_id=reservation["reader_id"],
+            title="预约图书已到馆",
+            content=f"您预约的图书《{book['title']}》已到馆，请尽快到图书馆借阅。",
+            msg_type="reservation"
+        )
+    except Exception:
+        pass
     
     audit_log_service.log_action(
         user_id=current_user["id"],
