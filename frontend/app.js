@@ -1,4 +1,4 @@
-console.log('app.js loaded');
+﻿﻿﻿console.log('app.js loaded');
 const API_BASE_URL = window.location.origin; // 动态获取当前页面地址，避免 localhost/127.0.0.1 不一致问题
 const state = {
   token: localStorage.getItem('library_token') || '',
@@ -107,6 +107,30 @@ async function initAuth() {
     showLogin();
   }
 }
+
+// 通用确认弹窗
+let confirmCallback = null;
+
+function showConfirmModal(message, callback) {
+  $('confirmMessage').textContent = message;
+  confirmCallback = callback;
+  $('confirmModal').classList.remove('hidden');
+}
+
+function closeConfirmModal() {
+  $('confirmModal').classList.add('hidden');
+  confirmCallback = null;
+}
+
+function handleConfirmOk() {
+  if (confirmCallback) {
+    confirmCallback();
+  }
+  closeConfirmModal();
+}
+
+// 绑定确认弹窗确定按钮事件
+$('confirmOkBtn')?.addEventListener('click', handleConfirmOk);
 
 function statusBadge(status) {
   const map = { borrowed: '借阅中', overdue: '已逾期', returned: '已归还' };
@@ -1025,9 +1049,15 @@ function updateCharCount() {
 }
 
 async function deleteBook(id) {
-  if (!confirm('确认删除该图书？未归还图书不允许删除。')) return;
-  try { await api(`/api/books/${id}`, { method: 'DELETE' }); toast('删除成功', 'success'); loadBooks(); }
-  catch (e) { toast(e.message, 'error'); }
+  showConfirmModal('确认删除该图书？未归还图书不允许删除。', async () => {
+    try { 
+      await api(`/api/books/${id}`, { method: 'DELETE' }); 
+      toast('删除成功', 'success'); 
+      loadBooks(); 
+    } catch (e) { 
+      toast(e.message, 'error'); 
+    }
+  });
 }
 
 let pendingBorrowBookId = null;
@@ -1215,7 +1245,8 @@ async function confirmBorrow() {
       body: JSON.stringify({
         book_id: pendingBorrowBookId,
         days: days,
-        remark: ''
+        remark: '',
+        borrow_date: startDate
       })
     });
 
@@ -1523,7 +1554,7 @@ async function submitBorrowForm() {
         book_id: parseInt(bookId),
         reader_id: parseInt(readerId),
         borrow_date: outDate,
-        due_date: dueDate,
+        days: days,
         remark: fullRemark || null
       })
     });
@@ -1760,9 +1791,16 @@ function resetReaderPassword(id) {
 }
 
 async function deleteReader(id) {
-  if (!confirm('确认删除该读者？存在未还图书时不允许删除。')) return;
-  try { await api(`/api/readers/${id}`, { method: 'DELETE' }); toast('删除成功', 'success'); loadReaders(); loadBorrowOptions(); }
-  catch (e) { toast(e.message, 'error'); }
+  showConfirmModal('确认删除该读者？存在未还图书时不允许删除。', async () => {
+    try { 
+      await api(`/api/readers/${id}`, { method: 'DELETE' }); 
+      toast('删除成功', 'success'); 
+      loadReaders(); 
+      loadBorrowOptions(); 
+    } catch (e) { 
+      toast(e.message, 'error'); 
+    }
+  });
 }
 
 async function loadBorrowOptions() {
@@ -1825,40 +1863,71 @@ async function returnBook(recordId) {
   // 获取记录信息
   const record = state.lastRecords.find(r => r.id === recordId);
   const bookTitle = record ? record.book_title : '该图书';
-  if (!confirm(`确认归还《${bookTitle}》？`)) return;
-  try {
-    await api(`/api/borrow-records/${recordId}/return`, { method: 'PATCH' });
-    toast('归还成功，库存已恢复', 'success');
-    loadRecords();
-    loadDashboard();
+  showConfirmModal(`确认归还《${bookTitle}》？`, async () => {
+    try {
+      await api(`/api/borrow-records/${recordId}/return`, { method: 'PATCH' });
+      toast('归还成功，库存已恢复', 'success');
+      loadRecords();
+      loadDashboard();
+    } catch (e) { 
+      toast(e.message, 'error'); 
+    }
+  });
+}
+
+// 续借弹窗
+let renewRecordId = null;
+
+function showRenewModal(recordId, bookTitle) {
+  renewRecordId = recordId;
+  $('renewBookTitle').textContent = `《${bookTitle}》`;
+  $('renewDays').value = '15';
+  $('renewModal').classList.remove('hidden');
+}
+
+function closeRenewModal() {
+  $('renewModal').classList.add('hidden');
+  renewRecordId = null;
+}
+
+async function submitRenew() {
+  const days = $('renewDays').value;
+  if (!days || isNaN(days) || parseInt(days) < 1 || parseInt(days) > 90) {
+    toast('请输入有效的续借天数（1-90天）', 'error');
+    return;
   }
-  catch (e) { toast(e.message, 'error'); }
+  
+  try {
+    const record = state.lastRecords.find(r => r.id === renewRecordId);
+    const bookTitle = record ? record.book_title : '该图书';
+    await api(`/api/borrow-records/${renewRecordId}/renew`, { 
+      method: 'PATCH', 
+      body: JSON.stringify({ days: parseInt(days) }) 
+    });
+    toast(`《${bookTitle}》续借成功，已延长${days}天`, 'success');
+    loadRecords();
+    closeRenewModal();
+  } catch (e) { 
+    toast(e.message, 'error'); 
+  }
 }
 
 async function renewBook(recordId) {
   const record = state.lastRecords.find(r => r.id === recordId);
   const bookTitle = record ? record.book_title : '该图书';
-  const days = prompt(`为《${bookTitle}》输入续借天数（1-90天）：`, '15');
-  if (!days || isNaN(days) || parseInt(days) < 1 || parseInt(days) > 90) {
-    toast('请输入有效的续借天数', 'error');
-    return;
-  }
-  try {
-    await api(`/api/borrow-records/${recordId}/renew`, { method: 'PATCH', body: JSON.stringify({ days: parseInt(days) }) });
-    toast(`《${bookTitle}》续借成功，已延长${days}天`, 'success');
-    loadRecords();
-  }
-  catch (e) { toast(e.message, 'error'); }
+  showRenewModal(recordId, bookTitle);
 }
 
 async function payFine(recordId) {
-  if (!confirm('确认缴纳罚金？')) return;
-  try {
-    const result = await api(`/api/borrow-records/${recordId}/pay-fine`, { method: 'POST' });
-    toast(result.message, 'success');
-    loadRecords();
-  }
-  catch (e) { toast(e.message, 'error'); }
+  showConfirmModal('确认缴纳罚金？', async () => {
+    try {
+      const result = await api(`/api/borrow-records/${recordId}/pay-fine`, { method: 'POST' });
+      toast(result.message, 'success');
+      loadRecords();
+    } catch (e) { 
+      toast(e.message, 'error'); 
+    }
+  });
 }
 
 state.reservationPage = 1;
@@ -1894,23 +1963,27 @@ function renderReservationActions(reservation) {
 }
 
 async function notifyReservation(reservationId) {
-  if (!confirm('确认通知读者前来取书？')) return;
-  try { 
-    await api(`/api/reservations/${reservationId}/notify`, { method: 'POST' }); 
-    toast('通知已发送', 'success'); 
-    loadReservations(); 
-  }
-  catch (e) { toast(e.message, 'error'); }
+  showConfirmModal('确认通知读者前来取书？', async () => {
+    try { 
+      await api(`/api/reservations/${reservationId}/notify`, { method: 'POST' }); 
+      toast('通知已发送', 'success'); 
+      loadReservations(); 
+    } catch (e) { 
+      toast(e.message, 'error'); 
+    }
+  });
 }
 
 async function cancelReservation(reservationId) {
-  if (!confirm('确认取消这个预约？')) return;
-  try {
-    await api(`/api/reservations/${reservationId}`, { method: 'DELETE' });
-    toast('预约已取消', 'success');
-    loadReservations();
-  }
-  catch (e) { toast(e.message, 'error'); }
+  showConfirmModal('确认取消这个预约？', async () => {
+    try {
+      await api(`/api/reservations/${reservationId}`, { method: 'DELETE' });
+      toast('预约已取消', 'success');
+      loadReservations();
+    } catch (e) { 
+      toast(e.message, 'error'); 
+    }
+  });
 }
 
 state.messagePage = 1;
@@ -1962,15 +2035,16 @@ async function markMessageRead(messageId) {
 }
 
 async function markAllMessagesRead() {
-  if (!confirm('确认将所有消息标记为已读？')) return;
-  try {
-    await api('/api/messages/read-all', { method: 'PATCH' });
-    toast('所有消息已标记为已读', 'success');
-    loadMessages();
-    updateUnreadBadge();
-  } catch (e) {
-    toast(e.message, 'error');
-  }
+  showConfirmModal('确认将所有消息标记为已读？', async () => {
+    try {
+      await api('/api/messages/read-all', { method: 'PATCH' });
+      toast('所有消息已标记为已读', 'success');
+      loadMessages();
+      updateUnreadBadge();
+    } catch (e) { 
+      toast(e.message, 'error'); 
+    }
+  });
 }
 
 async function loadReportView() {
@@ -2180,14 +2254,15 @@ function updateOverdueButtonStates() {
 }
 
 async function batchNotify() {
-  try {
-    if (!confirm('确认给所有逾期读者发送提醒通知？')) return;
-    const data = await api('/api/reminders/generate', { method: 'POST' });
-    toast(`已成功生成 ${data.created_count || 0} 条提醒消息`, 'success');
-    loadOverdue();
-  } catch (e) {
-    toast(e.message, 'error');
-  }
+  showConfirmModal('确认给所有逾期读者发送提醒通知？', async () => {
+    try {
+      const data = await api('/api/reminders/generate', { method: 'POST' });
+      toast(`已成功生成 ${data.created_count || 0} 条提醒消息`, 'success');
+      loadOverdue();
+    } catch (e) { 
+      toast(e.message, 'error'); 
+    }
+  });
 }
 
 async function generateReminders() {
@@ -2236,15 +2311,15 @@ async function viewOverdueDetail(recordId) {
 }
 
 async function notifyReminder(recordId) {
-  if (!confirm('确认发送提醒通知给读者？')) return;
-
-  try {
-    await api(`/api/borrow-records/${recordId}/notify`, { method: 'POST' });
-    toast('通知发送成功！', 'success');
-    loadOverdue();
-  } catch (e) {
-    toast(e.message, 'error');
-  }
+  showConfirmModal('确认发送提醒通知给读者？', async () => {
+    try {
+      await api(`/api/borrow-records/${recordId}/notify`, { method: 'POST' });
+      toast('通知发送成功！', 'success');
+      loadOverdue();
+    } catch (e) { 
+      toast(e.message, 'error'); 
+    }
+  });
 }
 
 async function loadRecommendations() {
@@ -3266,42 +3341,45 @@ async function editAnnouncement(id) {
 }
 
 async function archiveAnnouncement(id) {
-  if (!confirm('确认撤回该公告？撤回后读者将无法查看。')) return;
-  try {
-    await api(`/api/announcements/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ status: 'archived' })
-    });
-    toast('公告已撤回', 'success');
-    loadAnnouncements();
-  } catch (e) {
-    toast(e.message, 'error');
-  }
+  showConfirmModal('确认撤回该公告？撤回后读者将无法查看。', async () => {
+    try {
+      await api(`/api/announcements/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: 'archived' })
+      });
+      toast('公告已撤回', 'success');
+      loadAnnouncements();
+    } catch (e) { 
+      toast(e.message, 'error'); 
+    }
+  });
 }
 
 async function publishAnnouncement(id) {
-  if (!confirm('确认发布该公告？发布后读者将可以查看。')) return;
-  try {
-    await api(`/api/announcements/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify({ status: 'published' })
-    });
-    toast('公告已发布', 'success');
-    loadAnnouncements();
-  } catch (e) {
-    toast(e.message, 'error');
-  }
+  showConfirmModal('确认发布该公告？发布后读者将可以查看。', async () => {
+    try {
+      await api(`/api/announcements/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: 'published' })
+      });
+      toast('公告已发布', 'success');
+      loadAnnouncements();
+    } catch (e) { 
+      toast(e.message, 'error'); 
+    }
+  });
 }
 
 async function deleteAnnouncement(id) {
-  if (!confirm('确认删除该公告？此操作不可恢复。')) return;
-  try {
-    await api(`/api/announcements/${id}`, { method: 'DELETE' });
-    toast('删除成功', 'success');
-    loadAnnouncements();
-  } catch (e) {
-    toast(e.message, 'error');
-  }
+  showConfirmModal('确认删除该公告？此操作不可恢复。', async () => {
+    try {
+      await api(`/api/announcements/${id}`, { method: 'DELETE' });
+      toast('删除成功', 'success');
+      loadAnnouncements();
+    } catch (e) { 
+      toast(e.message, 'error'); 
+    }
+  });
 }
 
 async function saveAnnouncement(status) {
@@ -3434,9 +3512,9 @@ $('addBookBtn').addEventListener('click', () => openBookFormModal());
 $('importBooksBtn').addEventListener('click', () => $('importBooksFile').click());
 $('importBooksFile').addEventListener('change', importBooks);
 $('resetBookForm').addEventListener('click', () => {
-  if (confirm('确认清空表单内容？')) {
+  showConfirmModal('确认清空表单内容？', () => {
     resetBookFormFields();
-  }
+  });
 });
 $('bookForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -3506,21 +3584,22 @@ $('overdueSort')?.addEventListener('change', (e) => { currentOverdueSort = e.tar
 $('overdueKeyword')?.addEventListener('input', (e) => { overdueKeyword = e.target.value; });
 $('overdueKeyword')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') { overduePage = 1; loadOverdue(); } });
 $('generateRemindersBtn')?.addEventListener('click', async () => {
-  if (!confirm('确认要生成提醒消息吗？')) return;
-  const btn = $('generateRemindersBtn');
-  btn.querySelector('.btn-text').classList.add('hidden');
-  btn.querySelector('.btn-loading').classList.remove('hidden');
-  btn.disabled = true;
-  try {
-    await api('/api/reminders/generate', { method: 'POST' });
-    toast('提醒消息生成成功！', 'success');
-    loadOverdue();
-  } catch (e) { toast(e.message, 'error'); }
-  finally {
-    btn.querySelector('.btn-text').classList.remove('hidden');
-    btn.querySelector('.btn-loading').classList.add('hidden');
-    btn.disabled = false;
-  }
+  showConfirmModal('确认要生成提醒消息吗？', async () => {
+    const btn = $('generateRemindersBtn');
+    btn.querySelector('.btn-text').classList.add('hidden');
+    btn.querySelector('.btn-loading').classList.remove('hidden');
+    btn.disabled = true;
+    try {
+      await api('/api/reminders/generate', { method: 'POST' });
+      toast('提醒消息生成成功！', 'success');
+      loadOverdue();
+    } catch (e) { toast(e.message, 'error'); }
+    finally {
+      btn.querySelector('.btn-text').classList.remove('hidden');
+      btn.querySelector('.btn-loading').classList.add('hidden');
+      btn.disabled = false;
+    }
+  });
 });
 $('batchNotifyBtn')?.addEventListener('click', batchNotify);
 $('exportOverdueBtn')?.addEventListener('click', async () => {
@@ -4074,7 +4153,7 @@ async function submitBorrowForm() {
         book_id: parseInt(bookId),
         reader_id: parseInt(readerId),
         borrow_date: outDate,
-        due_date: dueDate,
+        days: days,
         remark: fullRemark || null
       })
     });

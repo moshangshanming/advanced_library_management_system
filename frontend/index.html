@@ -1003,6 +1003,46 @@
     </div>
   </div>
 
+  <!-- 通用确认弹窗 -->
+  <div id="confirmModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>确认操作</h3>
+        <button class="close-btn" onclick="closeConfirmModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="confirmMessage" style="text-align: center; color: var(--text-muted); line-height: 1.6;"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="ghost" onclick="closeConfirmModal()">取消</button>
+        <button class="primary" id="confirmOkBtn">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 续借弹窗 -->
+  <div id="renewModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>续借图书</h3>
+        <button class="close-btn" onclick="closeRenewModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="text-align: center; margin-bottom: 16px;">
+          <p id="renewBookTitle" style="font-size: 16px; font-weight: 500; color: #334155;"></p>
+        </div>
+        <label>
+          续借天数（1-90天）
+          <input type="number" id="renewDays" min="1" max="90" value="15" style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px;" />
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button class="ghost" onclick="closeRenewModal()">取消</button>
+        <button class="primary" onclick="submitRenew()">确认续借</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 公告弹窗（发布/编辑） -->
   <div id="announcementModal" class="modal hidden">
     <div class="modal-content">

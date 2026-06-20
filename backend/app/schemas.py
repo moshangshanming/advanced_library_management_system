@@ -83,6 +83,7 @@ class BorrowCreate(BaseModel):
     reader_id: Optional[int] = Field(default=None, ge=1)
     days: int = Field(default=30, ge=1, le=180)
     remark: str = Field(default="", max_length=200)
+    borrow_date: Optional[str] = Field(default=None, description="借阅开始日期，格式：YYYY-MM-DD")
 
 
 class ReaderReportItem(BaseModel):
